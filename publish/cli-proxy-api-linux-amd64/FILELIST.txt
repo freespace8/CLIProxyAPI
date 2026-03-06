@@ -1,9 +1,0 @@
-auths/.gitkeep
-cli-proxy-api
-config.yaml
-FILELIST.txt
-run.sh
-static/dashboard/assets/index-8uiw8JXv.css
-static/dashboard/assets/index-C5rGrsHk.js
-static/dashboard/index.html
-static/management.html

@@ -213,7 +213,7 @@ export function CodexMonitor(props: { accessKey: string }) {
           title="请求监控"
         />
         {liveError ? <p className="mt-4 rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">{liveError}</p> : null}
-        <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
+        <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
           {liveRequests.length === 0 ? <p className="rounded-xl border border-dashed px-4 py-8 text-sm text-muted-foreground">当前无进行中请求</p> : null}
           {liveRequests.map((request) => (
             <LiveRequestItem key={request.requestId} now={now} request={request} />
