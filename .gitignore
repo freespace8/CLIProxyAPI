@@ -19,7 +19,8 @@ gitstore/*
 objectstore/*
 
 # Static assets
-static/*
+static/management.html
+static/dashboard/*
 
 # Authentication data
 auths/*
@@ -36,6 +37,7 @@ GEMINI.md
 .codex/*
 .claude/*
 .gemini/*
+web/node_modules/*
 .serena/*
 .agent/*
 .agents/*

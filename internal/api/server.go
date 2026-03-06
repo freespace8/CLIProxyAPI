@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -25,6 +26,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/api/modules"
 	ampmodule "github.com/router-for-me/CLIProxyAPI/v6/internal/api/modules/amp"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/dashboard"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/logging"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/managementasset"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/usage"
@@ -41,6 +43,8 @@ import (
 )
 
 const oauthCallbackSuccessHTML = `<html><head><meta charset="utf-8"><title>Authentication successful</title><script>setTimeout(function(){window.close();},5000);</script></head><body><h1>Authentication successful!</h1><p>You can close this window.</p><p>This window will close automatically in 5 seconds.</p></body></html>`
+
+const dashboardAssetDir = "dashboard"
 
 type serverOptionConfig struct {
 	extraMiddleware      []gin.HandlerFunc
@@ -228,6 +232,7 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 			}
 		}
 	}
+	engine.Use(middleware.DashboardRequestMonitorMiddleware(dashboard.DefaultRequestMonitor()))
 
 	engine.Use(corsMiddleware())
 	wd, err := os.Getwd()
@@ -318,6 +323,9 @@ func NewServer(cfg *config.Config, authManager *auth.Manager, accessManager *sdk
 // It defines the endpoints and associates them with their respective handlers.
 func (s *Server) setupRoutes() {
 	s.engine.GET("/management.html", s.serveManagementControlPanel)
+	s.engine.GET("/dashboard.html", s.redirectDashboardPage)
+	s.engine.GET("/dashboard", s.redirectDashboardPage)
+	s.engine.GET("/dashboard/*filepath", s.serveDashboardAsset)
 	openaiHandlers := openai.NewOpenAIAPIHandler(s.handlers)
 	geminiHandlers := gemini.NewGeminiAPIHandler(s.handlers)
 	geminiCLIHandlers := gemini.NewGeminiCLIAPIHandler(s.handlers)
@@ -487,6 +495,9 @@ func (s *Server) registerManagementRoutes() {
 	mgmt.Use(s.managementAvailabilityMiddleware(), s.mgmt.Middleware())
 	{
 		mgmt.GET("/usage", s.mgmt.GetUsageStatistics)
+		mgmt.GET("/dashboard/codex/live", s.mgmt.GetCodexLiveRequests)
+		mgmt.GET("/dashboard/codex/logs", s.mgmt.GetCodexRequestLogs)
+		mgmt.GET("/dashboard/codex/logs/:id", s.mgmt.GetCodexRequestLog)
 		mgmt.GET("/usage/export", s.mgmt.ExportUsageStatistics)
 		mgmt.POST("/usage/import", s.mgmt.ImportUsageStatistics)
 		mgmt.GET("/config", s.mgmt.GetConfig)
@@ -654,12 +665,56 @@ func (s *Server) managementAvailabilityMiddleware() gin.HandlerFunc {
 }
 
 func (s *Server) serveManagementControlPanel(c *gin.Context) {
+	s.serveStaticControlPanel(c, managementasset.ManagementFileName, true)
+}
+
+func (s *Server) redirectDashboardPage(c *gin.Context) {
+	c.Redirect(http.StatusMovedPermanently, "/dashboard/")
+}
+
+func (s *Server) serveDashboardPage(c *gin.Context) {
+	s.serveDashboardFile(c, "index.html")
+}
+
+func (s *Server) serveDashboardAsset(c *gin.Context) {
+	requestPath := strings.TrimSpace(c.Param("filepath"))
+	if requestPath == "" || requestPath == "/" {
+		s.serveDashboardPage(c)
+		return
+	}
+
+	dashboardPath := strings.TrimPrefix(path.Clean("/"+requestPath), "/")
+	if dashboardPath == "" || dashboardPath == "." {
+		s.serveDashboardPage(c)
+		return
+	}
+
+	s.serveDashboardFile(c, dashboardPath)
+}
+
+func (s *Server) serveDashboardFile(c *gin.Context, assetPath string) {
 	cfg := s.cfg
 	if cfg == nil || cfg.RemoteManagement.DisableControlPanel {
 		c.AbortWithStatus(http.StatusNotFound)
 		return
 	}
-	filePath := managementasset.FilePath(s.configFilePath)
+
+	filePath := s.resolveDashboardAssetPath(assetPath)
+	if strings.TrimSpace(filePath) == "" {
+		c.AbortWithStatus(http.StatusNotFound)
+		return
+	}
+
+	c.File(filePath)
+}
+
+func (s *Server) serveStaticControlPanel(c *gin.Context, assetName string, ensureLatest bool) {
+	cfg := s.cfg
+	if cfg == nil || cfg.RemoteManagement.DisableControlPanel {
+		c.AbortWithStatus(http.StatusNotFound)
+		return
+	}
+	filePath := s.resolveStaticAssetPath(assetName)
 	if strings.TrimSpace(filePath) == "" {
 		c.AbortWithStatus(http.StatusNotFound)
 		return
@@ -667,8 +722,10 @@ func (s *Server) serveManagementControlPanel(c *gin.Context) {
 
 	if _, err := os.Stat(filePath); err != nil {
 		if os.IsNotExist(err) {
-			// Synchronously ensure management.html is available with a detached context.
-			// Control panel bootstrap should not be canceled by client disconnects.
+			if !ensureLatest {
+				c.AbortWithStatus(http.StatusNotFound)
+				return
+			}
 			if !managementasset.EnsureLatestManagementHTML(context.Background(), managementasset.StaticDir(s.configFilePath), cfg.ProxyURL, cfg.RemoteManagement.PanelGitHubRepository) {
 				c.AbortWithStatus(http.StatusNotFound)
 				return
@@ -681,6 +738,43 @@ func (s *Server) serveManagementControlPanel(c *gin.Context) {
 	}
 
 	c.File(filePath)
+}
+
+func (s *Server) resolveDashboardAssetPath(assetPath string) string {
+	cleanedPath := strings.TrimPrefix(path.Clean("/"+assetPath), "/")
+	if cleanedPath == "" || cleanedPath == "." {
+		cleanedPath = "index.html"
+	}
+
+	candidates := make([]string, 0, 2)
+	staticDir := strings.TrimSpace(managementasset.StaticDir(s.configFilePath))
+	if staticDir != "" {
+		candidates = append(candidates, filepath.Join(staticDir, dashboardAssetDir, filepath.FromSlash(cleanedPath)))
+	}
+	candidates = append(candidates, filepath.Join("static", dashboardAssetDir, filepath.FromSlash(cleanedPath)))
+
+	for _, candidate := range candidates {
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+	}
+
+	if filepath.Ext(cleanedPath) != "" {
+		return ""
+	}
+
+	return s.resolveDashboardAssetPath("index.html")
+}
+
+func (s *Server) resolveStaticAssetPath(assetName string) string {
+	staticDir := strings.TrimSpace(managementasset.StaticDir(s.configFilePath))
+	if staticDir != "" {
+		candidate := filepath.Join(staticDir, assetName)
+		if _, err := os.Stat(candidate); err == nil {
+			return candidate
+		}
+	}
+	return filepath.Join("static", assetName)
 }
 
 func (s *Server) enableKeepAlive(timeout time.Duration, onTimeout func()) {

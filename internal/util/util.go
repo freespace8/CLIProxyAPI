@@ -72,11 +72,12 @@ func SetLogLevel(cfg *config.Config) {
 }
 
 // ResolveAuthDir normalizes the auth directory path for consistent reuse throughout the app.
-// It expands a leading tilde (~) to the user's home directory and returns a cleaned path.
+// It expands a leading tilde (~), cleans the path, and resolves it to an absolute path.
 func ResolveAuthDir(authDir string) (string, error) {
 	if authDir == "" {
 		return "", nil
 	}
+	resolved := authDir
 	if strings.HasPrefix(authDir, "~") {
 		home, err := os.UserHomeDir()
 		if err != nil {
@@ -85,12 +86,17 @@ func ResolveAuthDir(authDir string) (string, error) {
 		remainder := strings.TrimPrefix(authDir, "~")
 		remainder = strings.TrimLeft(remainder, "/\\")
 		if remainder == "" {
-			return filepath.Clean(home), nil
+			resolved = home
+		} else {
+			normalized := strings.ReplaceAll(remainder, "\\", "/")
+			resolved = filepath.Join(home, filepath.FromSlash(normalized))
 		}
-		normalized := strings.ReplaceAll(remainder, "\\", "/")
-		return filepath.Clean(filepath.Join(home, filepath.FromSlash(normalized))), nil
 	}
-	return filepath.Clean(authDir), nil
+	abs, err := filepath.Abs(filepath.Clean(resolved))
+	if err != nil {
+		return "", fmt.Errorf("resolve auth dir: %w", err)
+	}
+	return abs, nil
 }
 
 // CountAuthFiles returns the number of auth records available through the provided Store.
