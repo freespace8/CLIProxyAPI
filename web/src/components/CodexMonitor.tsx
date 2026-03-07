@@ -34,9 +34,17 @@ function formatElapsed(startTime: string, now: number): string {
   const startedAt = new Date(startTime).getTime()
   if (!Number.isFinite(startedAt)) return '--'
   const elapsedMs = Math.max(0, now - startedAt)
-  const steppedMs = Math.floor(elapsedMs / 100) * 100
-  if (steppedMs < 1000) return `${steppedMs}ms`
-  return `${(steppedMs / 1000).toFixed(1)}s`
+  const steppedTenths = Math.floor(elapsedMs / 100)
+  const totalSeconds = Math.floor(steppedTenths / 10)
+  const tenths = steppedTenths % 10
+  const seconds = totalSeconds % 60
+  const minutes = Math.floor(totalSeconds / 60)
+
+  if (minutes < 100) {
+    return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}.${tenths}`
+  }
+
+  return `${minutes}:${String(seconds).padStart(2, '0')}.${tenths}`
 }
 
 function formatModelWithThinking(model: string, thinkingLevel?: string): string {
@@ -178,7 +186,7 @@ function useCodexRequestLogStream(accessKey: string) {
     }
 
     const handleStreamEvent = (event: RequestLogStreamEvent) => {
-      const eventTime = new Date().toLocaleString('zh-CN')
+      const eventTime = new Date().toISOString()
       setLastEventAt(eventTime)
       setStreamError('')
       setStreamState('connected')
@@ -254,13 +262,17 @@ function DashboardHeader(props: {
   liveCount: number
   state: StreamState
 }) {
+  const lastEventLabel = props.lastEventAt ? `最近事件 ${formatTime(props.lastEventAt)}` : '等待首包快照'
+
   return (
     <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
       <h2 className="text-xl font-semibold tracking-tight">请求监控</h2>
-      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground sm:flex-nowrap sm:justify-end">
         <Badge className="h-7 px-3" variant="outline">{`进行中 ${props.liveCount}`}</Badge>
         <Badge className="h-7 px-3" variant="outline">{streamStateLabel(props.state)}</Badge>
-        <span>{props.lastEventAt ? `最近事件 ${props.lastEventAt}` : '等待首包快照'}</span>
+        <span className="inline-flex min-w-[16ch] justify-end whitespace-nowrap font-mono tabular-nums">
+          {lastEventLabel}
+        </span>
       </div>
     </div>
   )
@@ -270,14 +282,18 @@ function LiveRequestItem(props: { now: number; request: LiveRequest }) {
   const modelLabel = formatModelWithThinking(props.request.model, props.request.thinkingLevel)
 
   return (
-    <article className="grid min-h-[60px] w-full grid-cols-[minmax(0,1fr)_68px] items-center gap-2 rounded-lg border px-3 py-2.5 sm:w-[240px]">
+    <article className="grid min-h-[60px] w-full grid-cols-[minmax(0,1fr)_78px] items-center gap-2 rounded-lg border px-3 py-2.5 sm:w-[240px]">
       <div className="min-w-0">
         <p className="truncate text-[13px] font-semibold leading-5" title={modelLabel}>
           {modelLabel}
         </p>
-        <p className="truncate font-mono text-[11px] text-muted-foreground">{formatTime(props.request.startTime)}</p>
+        <p className="truncate font-mono tabular-nums text-[11px] text-muted-foreground">{formatTime(props.request.startTime)}</p>
       </div>
-      <div className="text-right font-mono text-[11px] text-muted-foreground">{formatElapsed(props.request.startTime, props.now)}</div>
+      <div className="flex justify-end">
+        <span className="inline-flex min-w-[7ch] justify-end whitespace-nowrap font-mono tabular-nums text-[11px] leading-none text-muted-foreground">
+          {formatElapsed(props.request.startTime, props.now)}
+        </span>
+      </div>
     </article>
   )
 }
