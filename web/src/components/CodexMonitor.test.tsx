@@ -48,7 +48,7 @@ describe('CodexMonitor responsive layout', () => {
     expect(screen.queryByText('移动端使用摘要卡片，桌面端保留完整表格。')).not.toBeInTheDocument()
   })
 
-  it('renders live requests with mobile-friendly detail labels', async () => {
+  it('keeps live request cards on the original compact content layout', async () => {
     openCodexRequestLogStreamMock.mockResolvedValueOnce(streamFromEvents([
       {
         type: 'snapshot',
@@ -65,8 +65,9 @@ describe('CodexMonitor responsive layout', () => {
     render(<CodexMonitor accessKey="secret" />)
 
     expect(await screen.findByText('gpt-5-codex high')).toBeInTheDocument()
-    expect(screen.getByText('开始时间')).toBeInTheDocument()
-    expect(screen.getByText('已运行')).toBeInTheDocument()
+    expect(screen.queryByText('开始时间')).not.toBeInTheDocument()
+    expect(screen.queryByText('已运行')).not.toBeInTheDocument()
+    expect(screen.queryByText('请求正在处理中，已切换为移动端友好的摘要布局。')).not.toBeInTheDocument()
   })
 
   it('renders recent logs as mobile cards while keeping desktop table headings', async () => {

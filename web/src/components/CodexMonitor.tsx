@@ -292,24 +292,19 @@ function DashboardHeader(props: {
 
 function LiveRequestItem(props: { now: number; request: LiveRequest }) {
   const modelLabel = formatModelWithThinking(props.request.model, props.request.thinkingLevel)
-  const elapsedLabel = formatElapsed(props.request.startTime, props.now)
 
   return (
-    <article className="flex h-full flex-col gap-4 rounded-xl border px-4 py-4 sm:px-5">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="min-w-0 space-y-1">
-          <p className="truncate text-sm font-semibold leading-6 sm:text-[15px]" title={modelLabel}>
-            {modelLabel}
-          </p>
-          <p className="text-xs text-muted-foreground">请求正在处理中，已切换为移动端友好的摘要布局。</p>
-        </div>
-        <span className="inline-flex w-fit items-center rounded-full border px-3 py-1 text-xs font-medium text-muted-foreground">
-          进行中
-        </span>
+    <article className="grid min-h-[60px] grid-cols-[minmax(0,1fr)_78px] items-center gap-2 rounded-lg border px-3 py-2.5">
+      <div className="min-w-0">
+        <p className="truncate text-[13px] font-semibold leading-5" title={modelLabel}>
+          {modelLabel}
+        </p>
+        <p className="truncate font-mono tabular-nums text-[11px] text-muted-foreground">{formatTime(props.request.startTime)}</p>
       </div>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <MetricPair label="开始时间" value={formatTime(props.request.startTime)} valueClassName="font-mono text-xs tabular-nums text-muted-foreground sm:text-sm" />
-        <MetricPair label="已运行" value={elapsedLabel} valueClassName="font-mono text-sm tabular-nums text-muted-foreground" />
+      <div className="flex justify-end">
+        <span className="inline-flex min-w-[7ch] justify-end whitespace-nowrap font-mono tabular-nums text-[11px] leading-none text-muted-foreground">
+          {formatElapsed(props.request.startTime, props.now)}
+        </span>
       </div>
     </article>
   )
