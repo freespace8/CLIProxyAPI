@@ -31,7 +31,7 @@ import (
 )
 
 const (
-	codexResponsesWebsocketBetaHeaderValue = "responses_websockets=2026-02-04"
+	codexResponsesWebsocketBetaHeaderValue = "responses_websockets=2026-02-06"
 	codexResponsesWebsocketIdleTimeout     = 5 * time.Minute
 	codexResponsesWebsocketHandshakeTO     = 30 * time.Second
 )
@@ -56,11 +56,6 @@ type codexWebsocketSession struct {
 	conn   *websocket.Conn
 	wsURL  string
 	authID string
-
-	// connCreateSent tracks whether a `response.create` message has been successfully sent
-	// on the current websocket connection. The upstream expects the first message on each
-	// connection to be `response.create`.
-	connCreateSent bool
 
 	writeMu sync.Mutex
 
@@ -212,13 +207,7 @@ func (e *CodexWebsocketsExecutor) Execute(ctx context.Context, auth *cliproxyaut
 		defer sess.reqMu.Unlock()
 	}
 
-	allowAppend := true
-	if sess != nil {
-		sess.connMu.Lock()
-		allowAppend = sess.connCreateSent
-		sess.connMu.Unlock()
-	}
-	wsReqBody := buildCodexWebsocketRequestBody(body, allowAppend)
+	wsReqBody := buildCodexWebsocketRequestBody(body)
 	recordAPIRequest(ctx, e.cfg, upstreamRequestLog{
 		URL:       wsURL,
 		Method:    "WEBSOCKET",
@@ -280,10 +269,7 @@ func (e *CodexWebsocketsExecutor) Execute(ctx context.Context, auth *cliproxyaut
 			// execution session.
 			connRetry, _, errDialRetry := e.ensureUpstreamConn(ctx, auth, sess, authID, wsURL, wsHeaders)
 			if errDialRetry == nil && connRetry != nil {
-				sess.connMu.Lock()
-				allowAppend = sess.connCreateSent
-				sess.connMu.Unlock()
-				wsReqBodyRetry := buildCodexWebsocketRequestBody(body, allowAppend)
+				wsReqBodyRetry := buildCodexWebsocketRequestBody(body)
 				recordAPIRequest(ctx, e.cfg, upstreamRequestLog{
 					URL:       wsURL,
 					Method:    "WEBSOCKET",
@@ -312,8 +298,6 @@ func (e *CodexWebsocketsExecutor) Execute(ctx context.Context, auth *cliproxyaut
 			return resp, errSend
 		}
 	}
-	markCodexWebsocketCreateSent(sess, conn, wsReqBody)
-
 	for {
 		if ctx != nil && ctx.Err() != nil {
 			return resp, ctx.Err()
@@ -416,13 +400,7 @@ func (e *CodexWebsocketsExecutor) ExecuteStream(ctx context.Context, auth *clipr
 		sess.reqMu.Lock()
 	}
 
-	allowAppend := true
-	if sess != nil {
-		sess.connMu.Lock()
-		allowAppend = sess.connCreateSent
-		sess.connMu.Unlock()
-	}
-	wsReqBody := buildCodexWebsocketRequestBody(body, allowAppend)
+	wsReqBody := buildCodexWebsocketRequestBody(body)
 	recordAPIRequest(ctx, e.cfg, upstreamRequestLog{
 		URL:       wsURL,
 		Method:    "WEBSOCKET",
@@ -483,10 +461,7 @@ func (e *CodexWebsocketsExecutor) ExecuteStream(ctx context.Context, auth *clipr
 				sess.reqMu.Unlock()
 				return nil, errDialRetry
 			}
-			sess.connMu.Lock()
-			allowAppend = sess.connCreateSent
-			sess.connMu.Unlock()
-			wsReqBodyRetry := buildCodexWebsocketRequestBody(body, allowAppend)
+			wsReqBodyRetry := buildCodexWebsocketRequestBody(body)
 			recordAPIRequest(ctx, e.cfg, upstreamRequestLog{
 				URL:       wsURL,
 				Method:    "WEBSOCKET",
@@ -515,8 +490,6 @@ func (e *CodexWebsocketsExecutor) ExecuteStream(ctx context.Context, auth *clipr
 			return nil, errSend
 		}
 	}
-	markCodexWebsocketCreateSent(sess, conn, wsReqBody)
-
 	out := make(chan cliproxyexecutor.StreamChunk)
 	go func() {
 		terminateReason := "completed"
@@ -657,31 +630,13 @@ func writeCodexWebsocketMessage(sess *codexWebsocketSession, conn *websocket.Con
 	return conn.WriteMessage(websocket.TextMessage, payload)
 }
 
-func buildCodexWebsocketRequestBody(body []byte, allowAppend bool) []byte {
+func buildCodexWebsocketRequestBody(body []byte) []byte {
 	if len(body) == 0 {
 		return nil
 	}
 
-	// Codex CLI websocket v2 uses `response.create` with `previous_response_id` for incremental turns.
-	// The upstream ChatGPT Codex websocket currently rejects that with close 1008 (policy violation).
-	// Fall back to v1 `response.append` semantics on the same websocket connection to keep the session alive.
-	//
-	// NOTE: The upstream expects the first websocket event on each connection to be `response.create`,
-	// so we only use `response.append` after we have initialized the current connection.
-	if allowAppend {
-		if prev := strings.TrimSpace(gjson.GetBytes(body, "previous_response_id").String()); prev != "" {
-			inputNode := gjson.GetBytes(body, "input")
-			wsReqBody := []byte(`{}`)
-			wsReqBody, _ = sjson.SetBytes(wsReqBody, "type", "response.append")
-			if inputNode.Exists() && inputNode.IsArray() && strings.TrimSpace(inputNode.Raw) != "" {
-				wsReqBody, _ = sjson.SetRawBytes(wsReqBody, "input", []byte(inputNode.Raw))
-				return wsReqBody
-			}
-			wsReqBody, _ = sjson.SetRawBytes(wsReqBody, "input", []byte("[]"))
-			return wsReqBody
-		}
-	}
-
+	// 与上游 codex websocket v2 对齐：后续 turn 继续发送 response.create，
+	// 通过 previous_response_id + 增量 input 延续上下文。
 	wsReqBody, errSet := sjson.SetBytes(bytes.Clone(body), "type", "response.create")
 	if errSet == nil && len(wsReqBody) > 0 {
 		return wsReqBody
@@ -723,21 +678,6 @@ func readCodexWebsocketMessage(ctx context.Context, sess *codexWebsocketSession,
 			return ev.msgType, ev.payload, nil
 		}
 	}
-}
-
-func markCodexWebsocketCreateSent(sess *codexWebsocketSession, conn *websocket.Conn, payload []byte) {
-	if sess == nil || conn == nil || len(payload) == 0 {
-		return
-	}
-	if strings.TrimSpace(gjson.GetBytes(payload, "type").String()) != "response.create" {
-		return
-	}
-
-	sess.connMu.Lock()
-	if sess.conn == conn {
-		sess.connCreateSent = true
-	}
-	sess.connMu.Unlock()
 }
 
 func newProxyAwareWebsocketDialer(cfg *config.Config, auth *cliproxyauth.Auth) *websocket.Dialer {
@@ -1120,7 +1060,6 @@ func (e *CodexWebsocketsExecutor) ensureUpstreamConn(ctx context.Context, auth *
 	sess.conn = conn
 	sess.wsURL = wsURL
 	sess.authID = authID
-	sess.connCreateSent = false
 	sess.readerConn = conn
 	sess.connMu.Unlock()
 
@@ -1206,7 +1145,6 @@ func (e *CodexWebsocketsExecutor) invalidateUpstreamConn(sess *codexWebsocketSes
 		return
 	}
 	sess.conn = nil
-	sess.connCreateSent = false
 	if sess.readerConn == conn {
 		sess.readerConn = nil
 	}
@@ -1273,7 +1211,6 @@ func (e *CodexWebsocketsExecutor) closeExecutionSession(sess *codexWebsocketSess
 	authID := sess.authID
 	wsURL := sess.wsURL
 	sess.conn = nil
-	sess.connCreateSent = false
 	if sess.readerConn == conn {
 		sess.readerConn = nil
 	}
