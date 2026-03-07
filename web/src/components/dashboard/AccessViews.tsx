@@ -12,8 +12,8 @@ import { Input } from '@/components/ui/input'
 
 export function CenteredShell(props: { children: ReactNode }) {
   return (
-    <main className="min-h-screen">
-      <div className="mx-auto flex min-h-screen max-w-7xl items-center justify-center px-4 py-10 sm:px-6 lg:px-8">
+    <main className="min-h-screen bg-background">
+      <div className="mx-auto flex min-h-screen max-w-7xl items-center justify-center px-4 py-6 sm:px-6 sm:py-10 lg:px-8 lg:py-12">
         {props.children}
       </div>
     </main>
@@ -33,9 +33,9 @@ export function LoginCard(props: {
   }
 
   return (
-    <Card className="w-full max-w-2xl border-border/80 bg-card/85">
-      <CardHeader>
-        <CardTitle className="text-4xl sm:text-5xl">CLI Proxy API Dashboard</CardTitle>
+    <Card className="w-full max-w-2xl border-border/80 bg-card/85 shadow-sm">
+      <CardHeader className="space-y-3">
+        <CardTitle className="text-3xl leading-tight sm:text-4xl lg:text-5xl">CLI Proxy API Dashboard</CardTitle>
       </CardHeader>
       <CardContent className="space-y-5">
         {props.error ? (
@@ -53,7 +53,7 @@ export function LoginCard(props: {
             placeholder="请输入 Management Key"
             onChange={(event) => props.onChange(event.target.value)}
           />
-          <Button className="h-11 px-6" disabled={props.loading || !props.draftKey.trim()} type="submit">
+          <Button className="h-11 w-full px-6 sm:w-auto" disabled={props.loading || !props.draftKey.trim()} type="submit">
             {props.loading ? <RefreshCw className="size-4 animate-spin" /> : null}
             {props.loading ? '连接中...' : '进入 Dashboard'}
           </Button>

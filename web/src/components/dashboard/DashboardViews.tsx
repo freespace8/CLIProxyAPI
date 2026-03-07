@@ -6,11 +6,11 @@ import { Button } from '@/components/ui/button'
 
 function DashboardBar(props: { onLogout: () => void }) {
   return (
-    <div className="flex items-center justify-between gap-4">
-      <div className="min-w-0">
-        <h1 className="truncate text-xl font-semibold sm:text-2xl">CLI Proxy API Dashboard</h1>
+    <div className="flex flex-col gap-4 rounded-2xl border bg-card/70 p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between sm:p-5">
+      <div className="min-w-0 space-y-1">
+        <h1 className="truncate text-xl font-semibold sm:text-2xl lg:text-3xl">CLI Proxy API Dashboard</h1>
       </div>
-      <Button onClick={props.onLogout} variant="outline">
+      <Button className="w-full sm:w-auto" onClick={props.onLogout} variant="outline">
         <LogOut className="size-4" />
         退出
       </Button>
@@ -23,8 +23,8 @@ export function DashboardView(props: {
   onLogout: () => void
 }) {
   return (
-    <main className="min-h-screen">
-      <div className="mx-auto flex min-h-screen max-w-7xl flex-col gap-6 px-4 py-8 sm:px-6 lg:px-8">
+    <main className="min-h-screen bg-background">
+      <div className="mx-auto flex min-h-screen max-w-7xl flex-col gap-5 px-4 py-5 sm:gap-6 sm:px-6 sm:py-8 lg:px-8 lg:py-10">
         <DashboardBar onLogout={props.onLogout} />
         <CodexMonitor accessKey={props.accessKey} />
       </div>

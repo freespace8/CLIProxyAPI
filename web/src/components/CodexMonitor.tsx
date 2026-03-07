@@ -61,7 +61,7 @@ function formatTokenCount(value: number): string {
 
 function formatStatusLabel(log: RequestLogRecord): string {
   if (log.success) return '成功'
-  return log.errorMessage?.trim() || `失败(${log.statusCode})`
+  return `失败(${log.statusCode})`
 }
 
 function statusClass(log: RequestLogRecord): string {
@@ -238,7 +238,6 @@ function useCodexRequestLogStream(accessKey: string) {
       }
     }
 
-    // 关键逻辑：整页只保持一条长连接，首次拿快照，后续完全依赖 append/heartbeat。
     void connect()
 
     return () => {
@@ -257,6 +256,15 @@ function useCodexRequestLogStream(accessKey: string) {
   }
 }
 
+function MetricPair(props: { label: string; value: string; valueClassName?: string }) {
+  return (
+    <div className="grid gap-1 rounded-lg bg-muted/40 px-3 py-2">
+      <span className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">{props.label}</span>
+      <span className={`min-w-0 text-sm font-medium ${props.valueClassName ?? ''}`.trim()}>{props.value}</span>
+    </div>
+  )
+}
+
 function DashboardHeader(props: {
   lastEventAt: string
   liveCount: number
@@ -265,12 +273,16 @@ function DashboardHeader(props: {
   const lastEventLabel = props.lastEventAt ? `最近事件 ${formatTime(props.lastEventAt)}` : '等待首包快照'
 
   return (
-    <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-      <h2 className="text-xl font-semibold tracking-tight">请求监控</h2>
-      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground sm:flex-nowrap sm:justify-end">
-        <Badge className="h-7 px-3" variant="outline">{`进行中 ${props.liveCount}`}</Badge>
-        <Badge className="h-7 px-3" variant="outline">{streamStateLabel(props.state)}</Badge>
-        <span className="inline-flex min-w-[16ch] justify-end whitespace-nowrap font-mono tabular-nums">
+    <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+      <div className="space-y-1">
+        <h2 className="text-lg font-semibold tracking-tight sm:text-xl">请求监控</h2>
+      </div>
+      <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center lg:max-w-[28rem] lg:justify-end">
+        <div className="flex flex-wrap gap-2">
+          <Badge className="h-8 px-3" variant="outline">{`进行中 ${props.liveCount}`}</Badge>
+          <Badge className="h-8 px-3" variant="outline">{streamStateLabel(props.state)}</Badge>
+        </div>
+        <span className="inline-flex min-h-8 items-center rounded-full border px-3 py-1 text-left font-mono text-[11px] tabular-nums text-muted-foreground sm:text-xs lg:justify-end">
           {lastEventLabel}
         </span>
       </div>
@@ -280,19 +292,24 @@ function DashboardHeader(props: {
 
 function LiveRequestItem(props: { now: number; request: LiveRequest }) {
   const modelLabel = formatModelWithThinking(props.request.model, props.request.thinkingLevel)
+  const elapsedLabel = formatElapsed(props.request.startTime, props.now)
 
   return (
-    <article className="grid min-h-[60px] w-full grid-cols-[minmax(0,1fr)_78px] items-center gap-2 rounded-lg border px-3 py-2.5 sm:w-[240px]">
-      <div className="min-w-0">
-        <p className="truncate text-[13px] font-semibold leading-5" title={modelLabel}>
-          {modelLabel}
-        </p>
-        <p className="truncate font-mono tabular-nums text-[11px] text-muted-foreground">{formatTime(props.request.startTime)}</p>
-      </div>
-      <div className="flex justify-end">
-        <span className="inline-flex min-w-[7ch] justify-end whitespace-nowrap font-mono tabular-nums text-[11px] leading-none text-muted-foreground">
-          {formatElapsed(props.request.startTime, props.now)}
+    <article className="flex h-full flex-col gap-4 rounded-xl border px-4 py-4 sm:px-5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0 space-y-1">
+          <p className="truncate text-sm font-semibold leading-6 sm:text-[15px]" title={modelLabel}>
+            {modelLabel}
+          </p>
+          <p className="text-xs text-muted-foreground">请求正在处理中，已切换为移动端友好的摘要布局。</p>
+        </div>
+        <span className="inline-flex w-fit items-center rounded-full border px-3 py-1 text-xs font-medium text-muted-foreground">
+          进行中
         </span>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <MetricPair label="开始时间" value={formatTime(props.request.startTime)} valueClassName="font-mono text-xs tabular-nums text-muted-foreground sm:text-sm" />
+        <MetricPair label="已运行" value={elapsedLabel} valueClassName="font-mono text-sm tabular-nums text-muted-foreground" />
       </div>
     </article>
   )
@@ -300,10 +317,16 @@ function LiveRequestItem(props: { now: number; request: LiveRequest }) {
 
 function LiveRequestsPanel(props: { now: number; requests: LiveRequest[] }) {
   return (
-    <section className="rounded-2xl border bg-card p-5 shadow-sm sm:p-6">
-      <h3 className="text-base font-semibold tracking-tight">实时请求</h3>
-      <div className="mt-4 flex flex-wrap gap-2">
-        {props.requests.length === 0 ? <p className="w-full rounded-xl border border-dashed px-4 py-8 text-sm text-muted-foreground">当前无进行中请求</p> : null}
+    <section className="rounded-2xl border bg-card p-4 shadow-sm sm:p-6">
+      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+        <h3 className="text-base font-semibold tracking-tight">实时请求</h3>
+      </div>
+      <div
+        className="mt-4 grid gap-3"
+        data-testid="live-requests-grid"
+        style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 18rem), 1fr))' }}
+      >
+        {props.requests.length === 0 ? <p className="col-span-full rounded-xl border border-dashed px-4 py-8 text-sm text-muted-foreground">当前无进行中请求</p> : null}
         {props.requests.map((request) => (
           <LiveRequestItem key={request.requestId} now={props.now} request={request} />
         ))}
@@ -312,14 +335,64 @@ function LiveRequestsPanel(props: { now: number; requests: LiveRequest[] }) {
   )
 }
 
+function MobileLogCard(props: {
+  log: RequestLogRecord
+  onOpenError: (log: RequestLogRecord) => void
+}) {
+  const modelLabel = formatModelWithThinking(props.log.model, props.log.thinkingLevel)
+  const statusLabel = formatStatusLabel(props.log)
+
+  return (
+    <article className="rounded-xl border p-4 shadow-sm">
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0 space-y-1">
+            <p className="truncate text-sm font-semibold" title={modelLabel}>{modelLabel}</p>
+            <p className="font-mono text-xs text-muted-foreground">{formatTime(props.log.timestamp)}</p>
+          </div>
+          {props.log.success ? (
+            <span className={`inline-flex w-fit items-center rounded-full border px-3 py-1 text-xs font-medium ${statusClass(props.log)}`}>
+              {statusLabel}
+            </span>
+          ) : (
+            <button
+              className={`inline-flex w-fit items-center rounded-full border px-3 py-1 text-left text-xs font-medium underline underline-offset-4 ${statusClass(props.log)}`}
+              onClick={() => props.onOpenError(props.log)}
+              title={statusLabel}
+              type="button"
+            >
+              {statusLabel}
+            </button>
+          )}
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <MetricPair label="耗时" value={formatDuration(props.log.durationMs)} valueClassName="font-mono text-xs tabular-nums sm:text-sm" />
+          <MetricPair label="总 Token" value={formatTokenCount(props.log.totalTokens)} valueClassName="font-mono text-xs tabular-nums sm:text-sm" />
+          <MetricPair label="缓存读取" value={formatTokenCount(props.log.cacheReadTokens)} valueClassName="font-mono text-xs tabular-nums sm:text-sm" />
+          <MetricPair label="缓存写入" value={formatTokenCount(props.log.cacheWriteTokens)} valueClassName="font-mono text-xs tabular-nums sm:text-sm" />
+        </div>
+      </div>
+    </article>
+  )
+}
+
 function LogsTable(props: {
   logs: RequestLogRecord[]
   onOpenError: (log: RequestLogRecord) => void
 }) {
+  const desktopGridClassName = 'grid w-full grid-cols-[minmax(0,1.2fr)_minmax(0,1.5fr)_minmax(0,1.4fr)_minmax(72px,0.7fr)_minmax(64px,0.65fr)_minmax(64px,0.7fr)_minmax(64px,0.7fr)] items-center gap-3 lg:gap-4'
+
   return (
-    <div className="mt-4 overflow-x-auto">
-      <div className="min-w-[940px]">
-        <div className="grid grid-cols-[132px_minmax(280px,1fr)_180px_96px_88px_96px_96px] items-center gap-4 border-b px-2 py-3 text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+    <>
+      <div className="mt-4 grid gap-3 md:hidden">
+        {props.logs.length === 0 ? <p className="rounded-xl border border-dashed px-4 py-8 text-sm text-muted-foreground">最近还没有 Codex 请求日志。</p> : null}
+        {props.logs.map((log) => (
+          <MobileLogCard key={log.id} log={log} onOpenError={props.onOpenError} />
+        ))}
+      </div>
+
+      <div className="mt-4 hidden md:block" data-testid="logs-desktop-table">
+        <div className={`${desktopGridClassName} border-b px-2 py-3 text-[11px] uppercase tracking-[0.18em] text-muted-foreground`} data-testid="logs-desktop-grid">
           <span>时间</span>
           <span>模型</span>
           <span>状态</span>
@@ -333,14 +406,14 @@ function LogsTable(props: {
           const modelLabel = formatModelWithThinking(log.model, log.thinkingLevel)
 
           return (
-            <div className="grid grid-cols-[132px_minmax(280px,1fr)_180px_96px_88px_96px_96px] items-center gap-4 border-b px-2 py-4 last:border-b-0" key={log.id}>
-              <span className="font-mono text-xs text-muted-foreground">{formatTime(log.timestamp)}</span>
+            <div className={`${desktopGridClassName} border-b px-2 py-4 last:border-b-0`} key={log.id}>
+              <span className="truncate font-mono text-xs text-muted-foreground">{formatTime(log.timestamp)}</span>
               <span className="truncate text-sm font-semibold" title={modelLabel}>
                 {modelLabel}
               </span>
               <span className="min-w-0">
                 {log.success ? (
-                  <span className={`truncate text-sm font-medium ${statusClass(log)}`}>{formatStatusLabel(log)}</span>
+                  <span className={`block truncate text-sm font-medium ${statusClass(log)}`}>{formatStatusLabel(log)}</span>
                 ) : (
                   <button
                     className={`block w-full truncate text-left text-sm font-medium underline underline-offset-4 focus-visible:outline-none ${statusClass(log)}`}
@@ -352,15 +425,15 @@ function LogsTable(props: {
                   </button>
                 )}
               </span>
-              <span className="font-mono text-xs">{formatDuration(log.durationMs)}</span>
-              <span className="font-mono text-xs">{formatTokenCount(log.totalTokens)}</span>
-              <span className="font-mono text-xs">{formatTokenCount(log.cacheReadTokens)}</span>
-              <span className="font-mono text-xs">{formatTokenCount(log.cacheWriteTokens)}</span>
+              <span className="truncate font-mono text-xs">{formatDuration(log.durationMs)}</span>
+              <span className="truncate font-mono text-xs">{formatTokenCount(log.totalTokens)}</span>
+              <span className="truncate font-mono text-xs">{formatTokenCount(log.cacheReadTokens)}</span>
+              <span className="truncate font-mono text-xs">{formatTokenCount(log.cacheWriteTokens)}</span>
             </div>
           )
         })}
       </div>
-    </div>
+    </>
   )
 }
 
@@ -381,16 +454,18 @@ export function CodexMonitor(props: { accessKey: string }) {
   }, [requestLogs, selectedLog])
 
   return (
-    <section className="grid gap-6">
-      <section className="rounded-2xl border bg-card p-5 shadow-sm sm:p-6">
+    <section className="grid gap-5 lg:gap-6">
+      <section className="rounded-2xl border bg-card p-4 shadow-sm sm:p-6">
         <DashboardHeader lastEventAt={lastEventAt} liveCount={liveRequests.length} state={streamState} />
         {streamError ? <p className="mt-4 rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">{streamError}</p> : null}
       </section>
 
       <LiveRequestsPanel now={now} requests={liveRequests} />
 
-      <section className="rounded-2xl border bg-card p-5 shadow-sm sm:p-6">
-        <h3 className="text-base font-semibold tracking-tight">最近日志</h3>
+      <section className="rounded-2xl border bg-card p-4 shadow-sm sm:p-6">
+        <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+          <h3 className="text-base font-semibold tracking-tight">最近日志</h3>
+        </div>
         <LogsTable logs={requestLogs} onOpenError={setSelectedLog} />
       </section>
 

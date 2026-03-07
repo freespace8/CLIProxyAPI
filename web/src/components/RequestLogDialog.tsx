@@ -23,11 +23,11 @@ function copyText(value: string) {
 function DetailBlock(props: { action?: string; children: string; title: string }) {
   return (
     <section className="grid gap-3">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <h3 className="text-sm font-semibold">{props.title}</h3>
         {props.action ? (
           <button
-            className="text-sm text-muted-foreground underline underline-offset-4"
+            className="w-fit text-sm text-muted-foreground underline underline-offset-4"
             onClick={() => copyText(props.children)}
             type="button"
           >
@@ -35,7 +35,7 @@ function DetailBlock(props: { action?: string; children: string; title: string }
           </button>
         ) : null}
       </div>
-      <pre className="overflow-auto rounded-xl border bg-muted/40 p-4 text-xs text-foreground">{props.children || '无'}</pre>
+      <pre className="overflow-auto whitespace-pre-wrap break-words rounded-xl border bg-muted/40 p-4 text-xs text-foreground">{props.children || '无'}</pre>
     </section>
   )
 }
@@ -54,7 +54,7 @@ function DetailChips(props: { detail: RequestLogRecord }) {
 }
 
 function buildTitle(detail: RequestLogRecord): string {
-  return detail.errorMessage?.trim() || `失败(${detail.statusCode})`
+  return detail.success ? '成功' : `失败(${detail.statusCode})`
 }
 
 export function RequestLogDialog(props: { log: RequestLogRecord | null; onClose: () => void }) {
@@ -79,20 +79,20 @@ export function RequestLogDialog(props: { log: RequestLogRecord | null; onClose:
 
   if (!props.log) return null
 
-  const responseBody = props.log.responseBody?.trim() || '无 responseBody'
+  const responseBody = props.log.responseBody?.trim() || '无响应内容'
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 p-4 sm:p-8" onClick={props.onClose}>
+    <div className="fixed inset-0 z-50 bg-black/40 p-3 sm:p-6 lg:p-8" onClick={props.onClose}>
       <section
-        className="mx-auto flex max-h-[88vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border bg-background shadow-xl"
+        className="mx-auto flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border bg-background shadow-xl sm:max-h-[88vh]"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="sticky top-0 z-10 border-b bg-background px-5 py-4 sm:px-6 sm:py-4">
-          <div className="flex items-start justify-between gap-4">
+        <div className="sticky top-0 z-10 border-b bg-background px-4 py-4 sm:px-6 sm:py-4">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0 space-y-2">
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <div className="flex flex-col gap-1 sm:flex-row sm:flex-wrap sm:items-center sm:gap-x-3 sm:gap-y-1">
                 <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">错误响应</p>
-                <h2 className="text-lg font-semibold">{buildTitle(props.log)}</h2>
+                <h2 className="text-base font-semibold sm:text-lg">{buildTitle(props.log)}</h2>
               </div>
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
                 <p className="font-mono">{formatTime(props.log.timestamp)}</p>
@@ -106,10 +106,9 @@ export function RequestLogDialog(props: { log: RequestLogRecord | null; onClose:
             </button>
           </div>
         </div>
-        <div className="min-h-0 flex-1 overflow-auto px-5 py-4 sm:px-6 sm:py-5">
+        <div className="min-h-0 flex-1 overflow-auto px-4 py-4 sm:px-6 sm:py-5">
           <div className="grid gap-4">
-            <DetailBlock title="responseBody">{responseBody}</DetailBlock>
-            {props.log.errorMessage ? <p className="text-sm text-muted-foreground">错误信息：{props.log.errorMessage}</p> : null}
+            <DetailBlock title="响应内容">{responseBody}</DetailBlock>
             <button
               className="w-fit text-sm text-muted-foreground underline underline-offset-4"
               onClick={() => {
@@ -118,7 +117,7 @@ export function RequestLogDialog(props: { log: RequestLogRecord | null; onClose:
               }}
               type="button"
             >
-              {copied ? '已复制' : '复制 responseBody'}
+              {copied ? '已复制' : '复制响应内容'}
             </button>
           </div>
         </div>
