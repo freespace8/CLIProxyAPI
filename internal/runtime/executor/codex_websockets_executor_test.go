@@ -22,6 +22,9 @@ func TestBuildCodexWebsocketRequestBodyPreservesPreviousResponseID(t *testing.T)
 	if got := gjson.GetBytes(wsReqBody, "input.0.id").String(); got != "msg-1" {
 		t.Fatalf("input.0.id = %s, want msg-1", got)
 	}
+	if got := gjson.GetBytes(wsReqBody, "type").String(); got == "response.append" {
+		t.Fatalf("unexpected websocket request type: %s", got)
+	}
 }
 
 func TestApplyCodexWebsocketHeadersDefaultsToCurrentResponsesBeta(t *testing.T) {

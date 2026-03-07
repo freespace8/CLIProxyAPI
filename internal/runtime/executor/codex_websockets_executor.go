@@ -387,17 +387,17 @@ func (e *CodexWebsocketsExecutor) ExecuteStream(ctx context.Context, auth *clipr
 	wsHeaders = applyCodexWebsocketHeaders(ctx, wsHeaders, auth, apiKey)
 
 	var authID, authLabel, authType, authValue string
-	if auth != nil {
-		authID = auth.ID
-		authLabel = auth.Label
-		authType, authValue = auth.AccountInfo()
-	}
+	authID = auth.ID
+	authLabel = auth.Label
+	authType, authValue = auth.AccountInfo()
 
 	executionSessionID := executionSessionIDFromOptions(opts)
 	var sess *codexWebsocketSession
 	if executionSessionID != "" {
 		sess = e.getOrCreateSession(executionSessionID)
-		sess.reqMu.Lock()
+		if sess != nil {
+			sess.reqMu.Lock()
+		}
 	}
 
 	wsReqBody := buildCodexWebsocketRequestBody(body)
@@ -635,8 +635,9 @@ func buildCodexWebsocketRequestBody(body []byte) []byte {
 		return nil
 	}
 
-	// 与上游 codex websocket v2 对齐：后续 turn 继续发送 response.create，
-	// 通过 previous_response_id + 增量 input 延续上下文。
+	// Match codex-rs websocket v2 semantics: every request is `response.create`.
+	// Incremental follow-up turns continue on the same websocket using
+	// `previous_response_id` + incremental `input`, not `response.append`.
 	wsReqBody, errSet := sjson.SetBytes(bytes.Clone(body), "type", "response.create")
 	if errSet == nil && len(wsReqBody) > 0 {
 		return wsReqBody
@@ -955,36 +956,6 @@ func closeHTTPResponseBody(resp *http.Response, logPrefix string) {
 	if errClose := resp.Body.Close(); errClose != nil {
 		log.Errorf("%s: %v", logPrefix, errClose)
 	}
-}
-
-func closeOnContextDone(ctx context.Context, conn *websocket.Conn) chan struct{} {
-	done := make(chan struct{})
-	if ctx == nil || conn == nil {
-		return done
-	}
-	go func() {
-		select {
-		case <-done:
-		case <-ctx.Done():
-			_ = conn.Close()
-		}
-	}()
-	return done
-}
-
-func cancelReadOnContextDone(ctx context.Context, conn *websocket.Conn) chan struct{} {
-	done := make(chan struct{})
-	if ctx == nil || conn == nil {
-		return done
-	}
-	go func() {
-		select {
-		case <-done:
-		case <-ctx.Done():
-			_ = conn.SetReadDeadline(time.Now())
-		}
-	}()
-	return done
 }
 
 func executionSessionIDFromOptions(opts cliproxyexecutor.Options) string {
