@@ -108,7 +108,7 @@ describe('CodexMonitor responsive layout', () => {
     expect(screen.getByText('写缓存')).toBeInTheDocument()
   })
 
-  it('uses fluid desktop layout instead of fixed-width overflow containers', async () => {
+  it('keeps live request cards compact without reintroducing table overflow containers', async () => {
     openCodexRequestLogStreamMock.mockResolvedValueOnce(streamFromEvents([
       {
         type: 'snapshot',
@@ -137,9 +137,8 @@ describe('CodexMonitor responsive layout', () => {
     expect((await screen.findAllByText('gpt-5.4')).length).toBeGreaterThan(0)
 
     const liveRequestsGrid = screen.getByTestId('live-requests-grid')
-    expect(liveRequestsGrid).toHaveStyle({
-      gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 18rem), 1fr))',
-    })
+    expect(liveRequestsGrid.className).toContain('flex')
+    expect(liveRequestsGrid.className).toContain('flex-wrap')
 
     const desktopTable = screen.getByTestId('logs-desktop-table')
     const desktopGrid = screen.getByTestId('logs-desktop-grid')

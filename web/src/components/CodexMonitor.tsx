@@ -294,7 +294,7 @@ function LiveRequestItem(props: { now: number; request: LiveRequest }) {
   const modelLabel = formatModelWithThinking(props.request.model, props.request.thinkingLevel)
 
   return (
-    <article className="grid min-h-[60px] grid-cols-[minmax(0,1fr)_78px] items-center gap-2 rounded-lg border px-3 py-2.5">
+    <article className="grid min-h-[60px] w-full grid-cols-[minmax(0,1fr)_78px] items-center gap-2 rounded-lg border px-3 py-2.5 sm:w-[240px]">
       <div className="min-w-0">
         <p className="truncate text-[13px] font-semibold leading-5" title={modelLabel}>
           {modelLabel}
@@ -316,12 +316,8 @@ function LiveRequestsPanel(props: { now: number; requests: LiveRequest[] }) {
       <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
         <h3 className="text-base font-semibold tracking-tight">实时请求</h3>
       </div>
-      <div
-        className="mt-4 grid gap-3"
-        data-testid="live-requests-grid"
-        style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 18rem), 1fr))' }}
-      >
-        {props.requests.length === 0 ? <p className="col-span-full rounded-xl border border-dashed px-4 py-8 text-sm text-muted-foreground">当前无进行中请求</p> : null}
+      <div className="mt-4 flex flex-wrap gap-3" data-testid="live-requests-grid">
+        {props.requests.length === 0 ? <p className="w-full rounded-xl border border-dashed px-4 py-8 text-sm text-muted-foreground">当前无进行中请求</p> : null}
         {props.requests.map((request) => (
           <LiveRequestItem key={request.requestId} now={props.now} request={request} />
         ))}
