@@ -6,27 +6,23 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tidwall/gjson"
+	coreusage "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/usage"
 )
 
 type requestSnapshot struct {
-	id        string
-	method    string
-	url       string
-	headers   map[string]string
-	body      string
-	model     string
-	reasoning string
-	stream    bool
-	started   time.Time
+	model         string
+	thinkingLevel string
+	started       time.Time
 }
 
 type RequestMonitor struct {
-	mu       sync.RWMutex
-	capacity int
-	nextID   int64
-	live     map[string]requestSnapshot
-	logs     []RequestLogRecord
+	mu               sync.RWMutex
+	capacity         int
+	nextID           int64
+	nextSubscriberID uint64
+	live             map[string]requestSnapshot
+	logs             []RequestLogRecord
+	subscribers      map[uint64]chan MonitorStreamEvent
 }
 
 var defaultMonitor = NewRequestMonitor(DefaultLogCapacity)
@@ -38,8 +34,9 @@ func NewRequestMonitor(capacity int) *RequestMonitor {
 		capacity = DefaultLogCapacity
 	}
 	return &RequestMonitor{
-		capacity: capacity,
-		live:     make(map[string]requestSnapshot),
+		capacity:    capacity,
+		live:        make(map[string]requestSnapshot),
+		subscribers: make(map[uint64]chan MonitorStreamEvent),
 	}
 }
 
@@ -51,22 +48,65 @@ func (m *RequestMonitor) Start(record StartRecord) {
 	if startedAt.IsZero() {
 		startedAt = time.Now()
 	}
-	model, reasoning, stream := parseRequestBody(record.RequestBody)
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	m.live[record.RequestID] = requestSnapshot{
-		id:        record.RequestID,
-		method:    record.RequestMethod,
-		url:       record.RequestURL,
-		headers:   cloneHeaders(record.RequestHeaders),
-		body:      record.RequestBody,
-		model:     model,
-		reasoning: reasoning,
-		stream:    stream,
-		started:   startedAt,
+	liveRequest := LiveRequest{
+		RequestID:     record.RequestID,
+		Model:         fallbackModel(record.Model),
+		ThinkingLevel: normalizeThinkingLevel(record.ThinkingLevel),
+		StartTime:     startedAt,
 	}
+	m.live[record.RequestID] = requestSnapshot{
+		model:         liveRequest.Model,
+		thinkingLevel: liveRequest.ThinkingLevel,
+		started:       liveRequest.StartTime,
+	}
+	m.publishLocked(MonitorStreamEvent{
+		Type:    "live_upsert",
+		Request: cloneLiveRequestPtr(&liveRequest),
+	})
+}
+
+func (m *RequestMonitor) Update(record UpdateRecord) {
+	if m == nil || strings.TrimSpace(record.RequestID) == "" {
+		return
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	snapshot, ok := m.live[record.RequestID]
+	if !ok {
+		return
+	}
+	if model := strings.TrimSpace(record.Model); model != "" {
+		snapshot.model = model
+	}
+	if thinkingLevel := normalizeThinkingLevel(record.ThinkingLevel); thinkingLevel != "" {
+		snapshot.thinkingLevel = thinkingLevel
+	}
+	m.live[record.RequestID] = snapshot
+
+	m.publishLocked(MonitorStreamEvent{
+		Type: "live_upsert",
+		Request: cloneLiveRequestPtr(&LiveRequest{
+			RequestID:     record.RequestID,
+			Model:         fallbackModel(snapshot.model),
+			ThinkingLevel: snapshot.thinkingLevel,
+			StartTime:     snapshot.started,
+		}),
+	})
+}
+
+func (m *RequestMonitor) LiveCount() int {
+	if m == nil {
+		return 0
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return len(m.live)
 }
 
 func (m *RequestMonitor) Complete(record CompleteRecord) {
@@ -88,36 +128,43 @@ func (m *RequestMonitor) Complete(record CompleteRecord) {
 	if !ok {
 		return
 	}
+	model := snapshot.model
+	if trimmed := strings.TrimSpace(record.Model); trimmed != "" {
+		model = trimmed
+	}
+	thinkingLevel := snapshot.thinkingLevel
+	if trimmed := normalizeThinkingLevel(record.ThinkingLevel); trimmed != "" {
+		thinkingLevel = trimmed
+	}
 
 	m.nextID++
-	totalTokens, cacheReadTokens, cacheWriteTokens := parseUsageMetrics(record.ResponseBody, record.UpstreamResponse)
 	logRecord := RequestLogRecord{
 		ID:               m.nextID,
-		RequestID:        snapshot.id,
-		RequestMethod:    snapshot.method,
-		RequestURL:       snapshot.url,
-		RequestHeaders:   cloneHeaders(snapshot.headers),
-		RequestBody:      snapshot.body,
-		ResponseBody:     record.ResponseBody,
-		UpstreamRequest:  record.UpstreamRequest,
-		UpstreamResponse: record.UpstreamResponse,
 		Timestamp:        completedAt,
 		DurationMs:       completedAt.Sub(snapshot.started).Milliseconds(),
-		TotalTokens:      totalTokens,
-		CacheReadTokens:  cacheReadTokens,
-		CacheWriteTokens: cacheWriteTokens,
+		TotalTokens:      resolveTotalTokens(record.UsageDetail),
+		CacheReadTokens:  record.UsageDetail.CachedTokens,
+		CacheWriteTokens: record.UsageDetail.CacheWriteTokens,
 		StatusCode:       record.StatusCode,
 		Success:          record.StatusCode > 0 && record.StatusCode < 400,
-		Model:            snapshot.model,
-		Reasoning:        snapshot.reasoning,
+		Model:            fallbackModel(model),
+		ThinkingLevel:    thinkingLevel,
 		ErrorMessage:     strings.TrimSpace(record.ErrorMessage),
-		IsStreaming:      snapshot.stream,
+		ResponseBody:     strings.TrimSpace(record.ResponseBody),
+	}
+	if logRecord.Success {
+		logRecord.ResponseBody = ""
 	}
 
 	m.logs = append(m.logs, logRecord)
 	if len(m.logs) > m.capacity {
 		m.logs = m.logs[len(m.logs)-m.capacity:]
 	}
+	m.publishLocked(MonitorStreamEvent{
+		Type:      "append",
+		RequestID: record.RequestID,
+		Log:       cloneLogRecordPtr(&logRecord),
+	})
 }
 
 func (m *RequestMonitor) LiveRequests() []LiveRequest {
@@ -128,15 +175,12 @@ func (m *RequestMonitor) LiveRequests() []LiveRequest {
 	defer m.mu.RUnlock()
 
 	requests := make([]LiveRequest, 0, len(m.live))
-	for _, record := range m.live {
+	for requestID, record := range m.live {
 		requests = append(requests, LiveRequest{
-			RequestID:     record.id,
-			RequestMethod: record.method,
-			RequestURL:    record.url,
-			Model:         record.model,
-			Reasoning:     record.reasoning,
+			RequestID:     requestID,
+			Model:         fallbackModel(record.model),
+			ThinkingLevel: record.thinkingLevel,
 			StartTime:     record.started,
-			IsStreaming:   record.stream,
 		})
 	}
 	sort.Slice(requests, func(i, j int) bool {
@@ -159,163 +203,103 @@ func (m *RequestMonitor) RequestLogs() []RequestLogRecord {
 	return logs
 }
 
-func (m *RequestMonitor) RequestLog(id int64) (RequestLogRecord, bool) {
-	if m == nil || id <= 0 {
-		return RequestLogRecord{}, false
+func (m *RequestMonitor) Subscribe(buffer int) (uint64, <-chan MonitorStreamEvent) {
+	if m == nil {
+		ch := make(chan MonitorStreamEvent)
+		close(ch)
+		return 0, ch
 	}
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+	if buffer <= 0 {
+		buffer = 16
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.nextSubscriberID++
+	id := m.nextSubscriberID
+	ch := make(chan MonitorStreamEvent, buffer)
+	m.subscribers[id] = ch
+	return id, ch
+}
 
-	for idx := len(m.logs) - 1; idx >= 0; idx-- {
-		if m.logs[idx].ID == id {
-			return cloneLogRecord(m.logs[idx]), true
+func (m *RequestMonitor) Unsubscribe(id uint64) {
+	if m == nil || id == 0 {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.unsubscribeLocked(id)
+}
+
+func (m *RequestMonitor) SnapshotEvent() MonitorStreamEvent {
+	return MonitorStreamEvent{
+		Type:     "snapshot",
+		Requests: m.LiveRequests(),
+		Logs:     m.RequestLogs(),
+	}
+}
+
+func (m *RequestMonitor) unsubscribeLocked(id uint64) {
+	ch, exists := m.subscribers[id]
+	if !exists {
+		return
+	}
+	delete(m.subscribers, id)
+	close(ch)
+}
+
+func (m *RequestMonitor) publishLocked(event MonitorStreamEvent) {
+	for id, ch := range m.subscribers {
+		select {
+		case ch <- event:
+		default:
+			m.unsubscribeLocked(id)
 		}
 	}
-	return RequestLogRecord{}, false
 }
 
 func cloneLogRecord(record RequestLogRecord) RequestLogRecord {
-	record.RequestHeaders = cloneHeaders(record.RequestHeaders)
 	return record
 }
 
-func cloneHeaders(headers map[string]string) map[string]string {
-	if len(headers) == 0 {
-		return map[string]string{}
-	}
-	cloned := make(map[string]string, len(headers))
-	for key, value := range headers {
-		cloned[key] = value
-	}
-	return cloned
-}
-
-func parseRequestBody(body string) (string, string, bool) {
-	trimmed := strings.TrimSpace(body)
-	if trimmed == "" || !gjson.Valid(trimmed) {
-		return "--", "", false
-	}
-	model := strings.TrimSpace(gjson.Get(trimmed, "model").String())
-	if model == "" {
-		model = "--"
-	}
-	reasoning := strings.TrimSpace(gjson.Get(trimmed, "reasoning.effort").String())
-	return model, reasoning, gjson.Get(trimmed, "stream").Bool()
-}
-
-func parseUsageMetrics(payloads ...string) (int64, int64, int64) {
-	for _, payload := range payloads {
-		totalTokens, cacheRead, cacheWrite, ok := parseUsageMetricsFromPayload(payload)
-		if ok {
-			return totalTokens, cacheRead, cacheWrite
-		}
-	}
-	return 0, 0, 0
-}
-
-func parseUsageMetricsFromPayload(payload string) (int64, int64, int64, bool) {
-	candidates := splitJSONCandidates(payload)
-	for idx := len(candidates) - 1; idx >= 0; idx-- {
-		usageNode := firstUsageNode(gjson.Parse(candidates[idx]))
-		if !usageNode.Exists() {
-			continue
-		}
-		totalTokens := firstInt(
-			usageNode,
-			"total_tokens",
-			"totalTokenCount",
-		)
-		if totalTokens == 0 {
-			totalTokens = sumPositiveInts(
-				firstInt(usageNode, "prompt_tokens", "input_tokens", "promptTokenCount"),
-				firstInt(usageNode, "completion_tokens", "output_tokens", "candidatesTokenCount"),
-				firstInt(usageNode, "reasoning_tokens", "output_tokens_details.reasoning_tokens", "completion_tokens_details.reasoning_tokens", "thoughtsTokenCount"),
-			)
-		}
-		cacheRead := firstInt(
-			usageNode,
-			"prompt_tokens_details.cached_tokens",
-			"input_tokens_details.cached_tokens",
-			"cache_read_input_tokens",
-			"cachedContentTokenCount",
-		)
-		cacheWrite := firstInt(
-			usageNode,
-			"cache_creation_input_tokens",
-		)
-		if totalTokens > 0 || cacheRead > 0 || cacheWrite > 0 {
-			return totalTokens, cacheRead, cacheWrite, true
-		}
-	}
-	return 0, 0, 0, false
-}
-
-func splitJSONCandidates(payload string) []string {
-	trimmed := strings.TrimSpace(payload)
-	if trimmed == "" {
+func cloneLogRecordPtr(record *RequestLogRecord) *RequestLogRecord {
+	if record == nil {
 		return nil
 	}
-	if gjson.Valid(trimmed) {
-		return []string{trimmed}
-	}
-	lines := strings.Split(trimmed, "\n")
-	candidates := make([]string, 0, len(lines))
-	for _, line := range lines {
-		candidate := normalizeJSONCandidate(line)
-		if candidate == "" || !gjson.Valid(candidate) {
-			continue
-		}
-		candidates = append(candidates, candidate)
-	}
-	return candidates
+	cloned := cloneLogRecord(*record)
+	return &cloned
 }
 
-func normalizeJSONCandidate(line string) string {
-	trimmed := strings.TrimSpace(line)
-	if trimmed == "" {
-		return ""
-	}
-	if strings.HasPrefix(trimmed, "data:") {
-		trimmed = strings.TrimSpace(strings.TrimPrefix(trimmed, "data:"))
-	}
-	if trimmed == "[DONE]" {
-		return ""
-	}
-	return trimmed
+func cloneLiveRequest(record LiveRequest) LiveRequest {
+	return record
 }
 
-func firstUsageNode(root gjson.Result) gjson.Result {
-	paths := []string{
-		"usage",
-		"response.usage",
-		"usageMetadata",
-		"response.usageMetadata",
-		"usage_metadata",
-		"response.usage_metadata",
+func cloneLiveRequestPtr(record *LiveRequest) *LiveRequest {
+	if record == nil {
+		return nil
 	}
-	for _, path := range paths {
-		if result := root.Get(path); result.Exists() {
-			return result
-		}
-	}
-	return gjson.Result{}
+	cloned := cloneLiveRequest(*record)
+	return &cloned
 }
 
-func firstInt(node gjson.Result, paths ...string) int64 {
-	for _, path := range paths {
-		if result := node.Get(path); result.Exists() {
-			return result.Int()
-		}
+func fallbackModel(model string) string {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return "--"
 	}
-	return 0
+	return model
 }
 
-func sumPositiveInts(values ...int64) int64 {
-	var total int64
-	for _, value := range values {
-		if value > 0 {
-			total += value
-		}
+func normalizeThinkingLevel(level string) string {
+	return strings.ToLower(strings.TrimSpace(level))
+}
+
+func resolveTotalTokens(detail coreusage.Detail) int64 {
+	if detail.TotalTokens > 0 {
+		return detail.TotalTokens
 	}
-	return total
+	total := detail.InputTokens + detail.OutputTokens + detail.ReasoningTokens
+	if total > 0 {
+		return total
+	}
+	return detail.CachedTokens + detail.CacheWriteTokens
 }

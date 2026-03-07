@@ -14,6 +14,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	. "github.com/router-for-me/CLIProxyAPI/v6/internal/constant"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/dashboard"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/interfaces"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/registry"
 	"github.com/router-for-me/CLIProxyAPI/v6/sdk/api/handlers"
@@ -81,6 +82,11 @@ func (h *OpenAIResponsesAPIHandler) Responses(c *gin.Context) {
 		})
 		return
 	}
+	if modelName := gjson.GetBytes(rawJSON, "model").String(); modelName != "" {
+		dashboard.SetRequestModel(c, modelName)
+		dashboard.SetRequestThinkingLevel(c, dashboard.ResolveRequestThinkingLevel(rawJSON, modelName))
+		dashboard.PublishRequestLiveInfo(c)
+	}
 
 	// Check if the client requested a streaming response.
 	streamResult := gjson.GetBytes(rawJSON, "stream")
@@ -102,6 +108,11 @@ func (h *OpenAIResponsesAPIHandler) Compact(c *gin.Context) {
 			},
 		})
 		return
+	}
+	if modelName := gjson.GetBytes(rawJSON, "model").String(); modelName != "" {
+		dashboard.SetRequestModel(c, modelName)
+		dashboard.SetRequestThinkingLevel(c, dashboard.ResolveRequestThinkingLevel(rawJSON, modelName))
+		dashboard.PublishRequestLiveInfo(c)
 	}
 
 	streamResult := gjson.GetBytes(rawJSON, "stream")

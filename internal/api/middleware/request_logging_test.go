@@ -136,3 +136,56 @@ func TestShouldCaptureRequestBody(t *testing.T) {
 		}
 	}
 }
+
+func TestShouldBypassRequestLogging(t *testing.T) {
+	tests := []struct {
+		name          string
+		loggerEnabled bool
+		req           *http.Request
+		want          bool
+	}{
+		{
+			name:          "responses hotpath bypassed in error-only mode",
+			loggerEnabled: false,
+			req: &http.Request{
+				Method: http.MethodPost,
+				URL:    &url.URL{Path: "/v1/responses"},
+			},
+			want: true,
+		},
+		{
+			name:          "compact hotpath bypassed in error-only mode",
+			loggerEnabled: false,
+			req: &http.Request{
+				Method: http.MethodPost,
+				URL:    &url.URL{Path: "/v1/responses/compact"},
+			},
+			want: true,
+		},
+		{
+			name:          "responses not bypassed when logger enabled",
+			loggerEnabled: true,
+			req: &http.Request{
+				Method: http.MethodPost,
+				URL:    &url.URL{Path: "/v1/responses"},
+			},
+			want: false,
+		},
+		{
+			name:          "non hotpath not bypassed",
+			loggerEnabled: false,
+			req: &http.Request{
+				Method: http.MethodPost,
+				URL:    &url.URL{Path: "/v1/chat/completions"},
+			},
+			want: false,
+		},
+	}
+
+	for i := range tests {
+		got := shouldBypassRequestLogging(tests[i].loggerEnabled, tests[i].req)
+		if got != tests[i].want {
+			t.Fatalf("%s: got %t, want %t", tests[i].name, got, tests[i].want)
+		}
+	}
+}

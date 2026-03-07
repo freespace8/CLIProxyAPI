@@ -1,8 +1,15 @@
-import { useCallback, useEffect, useState } from 'react'
-import { loadCodexLiveRequests, loadCodexRequestLogs } from '../api'
+import { useEffect, useMemo, useState } from 'react'
+import { openCodexRequestLogStream, StreamRequestError } from '../api'
 import { formatCompactCount } from './dashboard/dashboardState'
-import type { LiveRequest, RequestLogRecord } from '../types'
+import type { LiveRequest, RequestLogRecord, RequestLogStreamEvent } from '../types'
 import { RequestLogDialog } from './RequestLogDialog'
+import { Badge } from './ui/badge'
+
+const MAX_VISIBLE_LOGS = 20
+const INITIAL_RECONNECT_DELAY_MS = 1500
+const MAX_RECONNECT_DELAY_MS = 10000
+
+type StreamState = 'connecting' | 'connected' | 'reconnecting' | 'stopped'
 
 function formatTime(value: string): string {
   const date = new Date(value)
@@ -17,21 +24,26 @@ function formatTime(value: string): string {
   }).format(date)
 }
 
-function formatElapsed(startTime: string, now: number): string {
-  const startedAt = new Date(startTime).getTime()
-  if (!Number.isFinite(startedAt)) return '--'
-  return `${((now - startedAt) / 1000).toFixed(1)}s`
-}
-
 function formatDuration(durationMs: number): string {
   if (!Number.isFinite(durationMs)) return '--'
   if (durationMs < 1000) return `${Math.round(durationMs)}ms`
   return `${(durationMs / 1000).toFixed(2)}s`
 }
 
-function formatCacheTokens(value: number): string {
-  if (!Number.isFinite(value) || value <= 0) return '--'
-  return formatCompactCount(value)
+function formatElapsed(startTime: string, now: number): string {
+  const startedAt = new Date(startTime).getTime()
+  if (!Number.isFinite(startedAt)) return '--'
+  const elapsedMs = Math.max(0, now - startedAt)
+  const steppedMs = Math.floor(elapsedMs / 100) * 100
+  if (steppedMs < 1000) return `${steppedMs}ms`
+  return `${(steppedMs / 1000).toFixed(1)}s`
+}
+
+function formatModelWithThinking(model: string, thinkingLevel?: string): string {
+  const normalizedModel = model.trim() || '--'
+  const normalizedThinkingLevel = thinkingLevel?.trim()
+  if (!normalizedThinkingLevel) return normalizedModel
+  return `${normalizedModel} ${normalizedThinkingLevel}`
 }
 
 function formatTokenCount(value: number): string {
@@ -39,62 +51,259 @@ function formatTokenCount(value: number): string {
   return formatCompactCount(value)
 }
 
-function statusClass(statusCode: number): string {
-  if (statusCode >= 400) return 'text-destructive'
-  return 'text-foreground'
+function formatStatusLabel(log: RequestLogRecord): string {
+  if (log.success) return '成功'
+  return log.errorMessage?.trim() || `失败(${log.statusCode})`
 }
 
-function requestLabel(request: Pick<LiveRequest, 'model' | 'reasoning'> | Pick<RequestLogRecord, 'model' | 'reasoning'>): string {
-  return request.reasoning ? `${request.model} · ${request.reasoning}` : request.model
+function statusClass(log: RequestLogRecord): string {
+  return log.success ? 'text-foreground' : 'text-destructive'
 }
 
-function SectionHeader(props: {
-  description: string
-  title: string
+function sortLogs(logs: RequestLogRecord[]): RequestLogRecord[] {
+  return [...logs].sort((left, right) => {
+    const leftTime = new Date(left.timestamp).getTime()
+    const rightTime = new Date(right.timestamp).getTime()
+    if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) {
+      return rightTime - leftTime
+    }
+    return right.id - left.id
+  })
+}
+
+function mergeLogs(currentLogs: RequestLogRecord[], nextLog: RequestLogRecord): RequestLogRecord[] {
+  const merged = [nextLog, ...currentLogs.filter((log) => log.id !== nextLog.id)]
+  return sortLogs(merged).slice(0, MAX_VISIBLE_LOGS)
+}
+
+function normalizeSnapshot(logs: RequestLogRecord[]): RequestLogRecord[] {
+  return sortLogs(logs).slice(0, MAX_VISIBLE_LOGS)
+}
+
+function sortLiveRequests(requests: LiveRequest[]): LiveRequest[] {
+  return [...requests].sort((left, right) => {
+    const leftTime = new Date(left.startTime).getTime()
+    const rightTime = new Date(right.startTime).getTime()
+    if (Number.isFinite(leftTime) && Number.isFinite(rightTime) && leftTime !== rightTime) {
+      return rightTime - leftTime
+    }
+    return left.requestId.localeCompare(right.requestId)
+  })
+}
+
+function mergeLiveRequests(currentRequests: LiveRequest[], nextRequest: LiveRequest): LiveRequest[] {
+  return sortLiveRequests([nextRequest, ...currentRequests.filter((request) => request.requestId !== nextRequest.requestId)])
+}
+
+function removeLiveRequest(currentRequests: LiveRequest[], requestId: string): LiveRequest[] {
+  return currentRequests.filter((request) => request.requestId !== requestId)
+}
+
+async function readNdjsonStream(
+  stream: ReadableStream<Uint8Array>,
+  onEvent: (event: RequestLogStreamEvent) => void,
+) {
+  const reader = stream.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() ?? ''
+
+      for (const rawLine of lines) {
+        const line = rawLine.trim()
+        if (!line) continue
+        onEvent(JSON.parse(line) as RequestLogStreamEvent)
+      }
+    }
+
+    const tail = `${buffer}${decoder.decode()}`.trim()
+    if (tail) onEvent(JSON.parse(tail) as RequestLogStreamEvent)
+  } finally {
+    reader.releaseLock()
+  }
+}
+
+function streamStateLabel(state: StreamState): string {
+  if (state === 'connected') return '已连接'
+  if (state === 'reconnecting') return '重连中'
+  if (state === 'stopped') return '已停止'
+  return '连接中'
+}
+
+function useCodexRequestLogStream(accessKey: string) {
+  const [liveRequests, setLiveRequests] = useState<LiveRequest[]>([])
+  const [requestLogs, setRequestLogs] = useState<RequestLogRecord[]>([])
+  const [streamError, setStreamError] = useState('')
+  const [streamState, setStreamState] = useState<StreamState>('connecting')
+  const [lastEventAt, setLastEventAt] = useState('')
+
+  useEffect(() => {
+    if (!accessKey.trim()) {
+      setLiveRequests([])
+      setRequestLogs([])
+      setStreamError('')
+      setStreamState('stopped')
+      setLastEventAt('')
+      return
+    }
+
+    const abortController = new AbortController()
+    let reconnectTimer: number | null = null
+    let reconnectDelay = INITIAL_RECONNECT_DELAY_MS
+    let isClosed = false
+
+    const clearReconnectTimer = () => {
+      if (reconnectTimer) {
+        window.clearTimeout(reconnectTimer)
+        reconnectTimer = null
+      }
+    }
+
+    const scheduleReconnect = (message: string) => {
+      if (isClosed) return
+      clearReconnectTimer()
+      setStreamError(message)
+      setStreamState('reconnecting')
+      reconnectTimer = window.setTimeout(() => {
+        reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY_MS)
+        void connect()
+      }, reconnectDelay)
+    }
+
+    const handleStreamEvent = (event: RequestLogStreamEvent) => {
+      const eventTime = new Date().toLocaleString('zh-CN')
+      setLastEventAt(eventTime)
+      setStreamError('')
+      setStreamState('connected')
+
+      if (event.type === 'snapshot') {
+        setLiveRequests(sortLiveRequests(event.requests ?? []))
+        setRequestLogs(normalizeSnapshot(event.logs ?? []))
+        return
+      }
+
+      if (event.type === 'live_upsert' && event.request) {
+        setLiveRequests((currentRequests) => mergeLiveRequests(currentRequests, event.request!))
+        return
+      }
+
+      if (event.type === 'append' && event.log) {
+        if (event.requestId) {
+          setLiveRequests((currentRequests) => removeLiveRequest(currentRequests, event.requestId!))
+        }
+        setRequestLogs((currentLogs) => mergeLogs(currentLogs, event.log!))
+      }
+    }
+
+    const connect = async () => {
+      if (isClosed) return
+      setStreamState((currentState) => (currentState === 'connected' ? 'reconnecting' : 'connecting'))
+
+      try {
+        const stream = await openCodexRequestLogStream(accessKey, abortController.signal)
+        if (isClosed) return
+        reconnectDelay = INITIAL_RECONNECT_DELAY_MS
+        setStreamError('')
+        setStreamState('connected')
+        await readNdjsonStream(stream, handleStreamEvent)
+
+        if (!abortController.signal.aborted) {
+          scheduleReconnect('日志推送已断开，正在重连…')
+        }
+      } catch (error) {
+        if (abortController.signal.aborted || isClosed) return
+
+        const message = error instanceof Error ? error.message : '日志订阅失败'
+        if (error instanceof StreamRequestError && !error.retryable) {
+          setStreamError(message)
+          setStreamState('stopped')
+          return
+        }
+        scheduleReconnect(message || '日志订阅失败，正在重连…')
+      }
+    }
+
+    // 关键逻辑：整页只保持一条长连接，首次拿快照，后续完全依赖 append/heartbeat。
+    void connect()
+
+    return () => {
+      isClosed = true
+      clearReconnectTimer()
+      abortController.abort()
+    }
+  }, [accessKey])
+
+  return {
+    liveRequests,
+    lastEventAt,
+    requestLogs,
+    streamError,
+    streamState,
+  }
+}
+
+function DashboardHeader(props: {
+  lastEventAt: string
+  liveCount: number
+  state: StreamState
 }) {
   return (
     <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-      <div className="space-y-1">
-        <h2 className="text-xl font-semibold tracking-tight">{props.title}</h2>
-        <p className="text-sm text-muted-foreground">{props.description}</p>
+      <h2 className="text-xl font-semibold tracking-tight">请求监控</h2>
+      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+        <Badge className="h-7 px-3" variant="outline">{`进行中 ${props.liveCount}`}</Badge>
+        <Badge className="h-7 px-3" variant="outline">{streamStateLabel(props.state)}</Badge>
+        <span>{props.lastEventAt ? `最近事件 ${props.lastEventAt}` : '等待首包快照'}</span>
       </div>
     </div>
   )
 }
 
 function LiveRequestItem(props: { now: number; request: LiveRequest }) {
-  const { request } = props
+  const modelLabel = formatModelWithThinking(props.request.model, props.request.thinkingLevel)
+
   return (
-    <article className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-2 rounded-lg border p-3">
-      <div className="min-w-0 space-y-1.5">
-        <div className="flex flex-wrap items-center gap-2">
-          <strong className="text-sm font-semibold">{requestLabel(request)}</strong>
-        </div>
-        <p className="break-all font-mono text-xs text-muted-foreground">
-          {request.requestMethod} {request.requestUrl}
+    <article className="grid min-h-[60px] w-full grid-cols-[minmax(0,1fr)_68px] items-center gap-2 rounded-lg border px-3 py-2.5 sm:w-[240px]">
+      <div className="min-w-0">
+        <p className="truncate text-[13px] font-semibold leading-5" title={modelLabel}>
+          {modelLabel}
         </p>
-        <p className="break-all font-mono text-xs text-muted-foreground">{request.requestId}</p>
+        <p className="truncate font-mono text-[11px] text-muted-foreground">{formatTime(props.request.startTime)}</p>
       </div>
-      <div className="shrink-0 text-right font-mono text-xs text-muted-foreground">
-        <div>{formatElapsed(request.startTime, props.now)}</div>
-      </div>
+      <div className="text-right font-mono text-[11px] text-muted-foreground">{formatElapsed(props.request.startTime, props.now)}</div>
     </article>
   )
 }
 
-function LogStatusText(props: { statusCode: number }) {
-  const label = props.statusCode === 200 ? '成功' : `失败(${props.statusCode})`
-  return <span className={`text-sm font-medium ${statusClass(props.statusCode)}`}>{label}</span>
+function LiveRequestsPanel(props: { now: number; requests: LiveRequest[] }) {
+  return (
+    <section className="rounded-2xl border bg-card p-5 shadow-sm sm:p-6">
+      <h3 className="text-base font-semibold tracking-tight">实时请求</h3>
+      <div className="mt-4 flex flex-wrap gap-2">
+        {props.requests.length === 0 ? <p className="w-full rounded-xl border border-dashed px-4 py-8 text-sm text-muted-foreground">当前无进行中请求</p> : null}
+        {props.requests.map((request) => (
+          <LiveRequestItem key={request.requestId} now={props.now} request={request} />
+        ))}
+      </div>
+    </section>
+  )
 }
 
 function LogsTable(props: {
   logs: RequestLogRecord[]
-  onSelect: (id: number) => void
+  onOpenError: (log: RequestLogRecord) => void
 }) {
   return (
     <div className="mt-4 overflow-x-auto">
-      <div className="min-w-[1020px]">
-        <div className="grid grid-cols-[132px_minmax(240px,1fr)_88px_100px_88px_100px_100px_76px] items-center gap-4 border-b px-2 py-3 text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+      <div className="min-w-[940px]">
+        <div className="grid grid-cols-[132px_minmax(280px,1fr)_180px_96px_88px_96px_96px] items-center gap-4 border-b px-2 py-3 text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
           <span>时间</span>
           <span>模型</span>
           <span>状态</span>
@@ -102,135 +311,74 @@ function LogsTable(props: {
           <span>Token</span>
           <span>读缓存</span>
           <span>写缓存</span>
-          <span>详情</span>
         </div>
         {props.logs.length === 0 ? <p className="px-2 py-8 text-sm text-muted-foreground">最近还没有 Codex 请求日志。</p> : null}
-        {props.logs.map((log) => (
-          <div className="grid grid-cols-[132px_minmax(240px,1fr)_88px_100px_88px_100px_100px_76px] items-center gap-4 border-b px-2 py-4 last:border-b-0" key={log.id}>
-            <span className="font-mono text-xs text-muted-foreground">{formatTime(log.timestamp)}</span>
-            <span className="min-w-0">
-              <span className="block truncate text-sm font-semibold" title={log.requestUrl}>
-                {requestLabel(log)}
+        {props.logs.map((log) => {
+          const modelLabel = formatModelWithThinking(log.model, log.thinkingLevel)
+
+          return (
+            <div className="grid grid-cols-[132px_minmax(280px,1fr)_180px_96px_88px_96px_96px] items-center gap-4 border-b px-2 py-4 last:border-b-0" key={log.id}>
+              <span className="font-mono text-xs text-muted-foreground">{formatTime(log.timestamp)}</span>
+              <span className="truncate text-sm font-semibold" title={modelLabel}>
+                {modelLabel}
               </span>
-              <span className="block truncate font-mono text-xs text-muted-foreground">{log.requestId}</span>
-            </span>
-            <span><LogStatusText statusCode={log.statusCode} /></span>
-            <span className="font-mono text-xs">{formatDuration(log.durationMs)}</span>
-            <span className="font-mono text-xs">{formatTokenCount(log.totalTokens)}</span>
-            <span className="font-mono text-xs">{formatCacheTokens(log.cacheReadTokens)}</span>
-            <span className="font-mono text-xs">{formatCacheTokens(log.cacheWriteTokens)}</span>
-            <span>
-              <button
-                className="text-sm font-medium text-foreground underline underline-offset-4 focus-visible:outline-none"
-                onClick={() => props.onSelect(log.id)}
-                type="button"
-              >
-                查看
-              </button>
-            </span>
-          </div>
-        ))}
+              <span className="min-w-0">
+                {log.success ? (
+                  <span className={`truncate text-sm font-medium ${statusClass(log)}`}>{formatStatusLabel(log)}</span>
+                ) : (
+                  <button
+                    className={`block w-full truncate text-left text-sm font-medium underline underline-offset-4 focus-visible:outline-none ${statusClass(log)}`}
+                    onClick={() => props.onOpenError(log)}
+                    title={formatStatusLabel(log)}
+                    type="button"
+                  >
+                    {formatStatusLabel(log)}
+                  </button>
+                )}
+              </span>
+              <span className="font-mono text-xs">{formatDuration(log.durationMs)}</span>
+              <span className="font-mono text-xs">{formatTokenCount(log.totalTokens)}</span>
+              <span className="font-mono text-xs">{formatTokenCount(log.cacheReadTokens)}</span>
+              <span className="font-mono text-xs">{formatTokenCount(log.cacheWriteTokens)}</span>
+            </div>
+          )
+        })}
       </div>
     </div>
   )
 }
 
-function useCodexMonitorState(accessKey: string) {
-  const [liveRequests, setLiveRequests] = useState<LiveRequest[]>([])
-  const [requestLogs, setRequestLogs] = useState<RequestLogRecord[]>([])
-  const [liveError, setLiveError] = useState('')
-  const [logError, setLogError] = useState('')
-  const refreshLive = useCallback(async () => {
-    setLiveError('')
-    try {
-      const response = await loadCodexLiveRequests(accessKey)
-      setLiveRequests(response.requests ?? [])
-    } catch (error) {
-      setLiveError(error instanceof Error ? error.message : '加载失败')
-      setLiveRequests([])
-    }
-  }, [accessKey])
-
-  const refreshLogs = useCallback(async () => {
-    setLogError('')
-    try {
-      const response = await loadCodexRequestLogs(accessKey)
-      setRequestLogs(response.logs ?? [])
-    } catch (error) {
-      setLogError(error instanceof Error ? error.message : '加载失败')
-      setRequestLogs([])
-    }
-  }, [accessKey])
-
-  useEffect(() => {
-    void refreshLive()
-    void refreshLogs()
-  }, [refreshLive, refreshLogs])
-
-  useEffect(() => {
-    const liveTimer = window.setInterval(() => {
-      void refreshLive()
-    }, 2000)
-    const logTimer = window.setInterval(() => {
-      void refreshLogs()
-    }, 5000)
-    return () => {
-      window.clearInterval(liveTimer)
-      window.clearInterval(logTimer)
-    }
-  }, [refreshLive, refreshLogs])
-
-  return {
-    liveError,
-    liveRequests,
-    logError,
-    refreshLive,
-    refreshLogs,
-    requestLogs,
-  }
-}
-
 export function CodexMonitor(props: { accessKey: string }) {
-  const [selectedLogId, setSelectedLogId] = useState<number | null>(null)
+  const [selectedLog, setSelectedLog] = useState<RequestLogRecord | null>(null)
   const [now, setNow] = useState(() => Date.now())
-  const {
-    liveError,
-    liveRequests,
-    logError,
-    requestLogs,
-  } = useCodexMonitorState(props.accessKey)
+  const { liveRequests, lastEventAt, requestLogs, streamError, streamState } = useCodexRequestLogStream(props.accessKey)
 
   useEffect(() => {
-    const tickTimer = window.setInterval(() => setNow(Date.now()), 200)
-    return () => window.clearInterval(tickTimer)
-  }, [])
+    if (liveRequests.length === 0) return
+    const timer = window.setInterval(() => setNow(Date.now()), 100)
+    return () => window.clearInterval(timer)
+  }, [liveRequests.length])
+
+  const dialogLog = useMemo(() => {
+    if (!selectedLog) return null
+    return requestLogs.find((log) => log.id === selectedLog.id) ?? selectedLog
+  }, [requestLogs, selectedLog])
 
   return (
     <section className="grid gap-6">
       <section className="rounded-2xl border bg-card p-5 shadow-sm sm:p-6">
-        <SectionHeader
-          description="展示当前正在执行的 Responses 请求，并以秒级更新耗时。"
-          title="请求监控"
-        />
-        {liveError ? <p className="mt-4 rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">{liveError}</p> : null}
-        <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
-          {liveRequests.length === 0 ? <p className="rounded-xl border border-dashed px-4 py-8 text-sm text-muted-foreground">当前无进行中请求</p> : null}
-          {liveRequests.map((request) => (
-            <LiveRequestItem key={request.requestId} now={now} request={request} />
-          ))}
-        </div>
+        <DashboardHeader lastEventAt={lastEventAt} liveCount={liveRequests.length} state={streamState} />
+        {streamError ? <p className="mt-4 rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">{streamError}</p> : null}
       </section>
+
+      <LiveRequestsPanel now={now} requests={liveRequests} />
 
       <section className="rounded-2xl border bg-card p-5 shadow-sm sm:p-6">
-        <SectionHeader
-          description="保留最近 20 条请求，支持查看原始请求与上游返回详情。"
-          title="请求日志"
-        />
-        {logError ? <p className="mt-4 rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive">{logError}</p> : null}
-        <LogsTable logs={requestLogs} onSelect={setSelectedLogId} />
+        <h3 className="text-base font-semibold tracking-tight">最近日志</h3>
+        <LogsTable logs={requestLogs} onOpenError={setSelectedLog} />
       </section>
 
-      <RequestLogDialog accessKey={props.accessKey} logId={selectedLogId} onClose={() => setSelectedLogId(null)} />
+      <RequestLogDialog log={dialogLog} onClose={() => setSelectedLog(null)} />
     </section>
   )
 }

@@ -1,42 +1,95 @@
 package management
 
 import (
+	"encoding/json"
 	"net/http"
-	"strconv"
-	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/dashboard"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/logging"
 )
 
-func (h *Handler) GetCodexLiveRequests(c *gin.Context) {
-	requests := dashboard.DefaultRequestMonitor().LiveRequests()
-	c.JSON(http.StatusOK, dashboard.LiveRequestsResponse{
-		Requests: requests,
-		Count:    len(requests),
-	})
-}
+var monitorHeartbeatLine = []byte("{\"type\":\"heartbeat\"}\n")
 
-func (h *Handler) GetCodexRequestLogs(c *gin.Context) {
-	logs := dashboard.DefaultRequestMonitor().RequestLogs()
-	c.JSON(http.StatusOK, dashboard.RequestLogsResponse{
-		Logs:  logs,
-		Total: len(logs),
-	})
-}
+func (h *Handler) StreamCodexRequestLogs(c *gin.Context) {
+	logging.SkipGinRequestLogging(c)
 
-func (h *Handler) GetCodexRequestLog(c *gin.Context) {
-	rawID := strings.TrimSpace(c.Param("id"))
-	id, err := strconv.ParseInt(rawID, 10, 64)
-	if err != nil || id <= 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid log id"})
-		return
-	}
-
-	logRecord, ok := dashboard.DefaultRequestMonitor().RequestLog(id)
+	flusher, ok := c.Writer.(http.Flusher)
 	if !ok {
-		c.JSON(http.StatusNotFound, gin.H{"error": "request log not found"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "streaming unsupported"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"log": logRecord})
+
+	c.Header("Content-Type", "application/x-ndjson; charset=utf-8")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no")
+
+	monitor := dashboard.DefaultRequestMonitor()
+	subID, stream := monitor.Subscribe(16)
+	defer monitor.Unsubscribe(subID)
+
+	if !writeMonitorStreamEvent(c, monitor.SnapshotEvent(), flusher) {
+		return
+	}
+
+	heartbeat := time.NewTicker(20 * time.Second)
+	liveHeartbeat := time.NewTicker(time.Second)
+	defer heartbeat.Stop()
+	defer liveHeartbeat.Stop()
+
+	for {
+		select {
+		case <-c.Request.Context().Done():
+			return
+		case event, ok := <-stream:
+			if !ok {
+				return
+			}
+			if !writeMonitorStreamEvent(c, event, flusher) {
+				return
+			}
+		case <-heartbeat.C:
+			if monitor.LiveCount() > 0 {
+				continue
+			}
+			if !writeMonitorHeartbeat(c, flusher) {
+				return
+			}
+		case <-liveHeartbeat.C:
+			if monitor.LiveCount() == 0 {
+				continue
+			}
+			if !writeMonitorHeartbeat(c, flusher) {
+				return
+			}
+		}
+	}
+}
+
+func writeMonitorHeartbeat(c *gin.Context, flusher http.Flusher) bool {
+	if c == nil {
+		return false
+	}
+	if _, err := c.Writer.Write(monitorHeartbeatLine); err != nil {
+		return false
+	}
+	flusher.Flush()
+	return true
+}
+
+func writeMonitorStreamEvent(c *gin.Context, event dashboard.MonitorStreamEvent, flusher http.Flusher) bool {
+	if c == nil {
+		return false
+	}
+	data, err := json.Marshal(event)
+	if err != nil {
+		return false
+	}
+	if _, err = c.Writer.Write(append(data, '\n')); err != nil {
+		return false
+	}
+	flusher.Flush()
+	return true
 }

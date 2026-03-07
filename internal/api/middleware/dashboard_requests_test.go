@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/dashboard"
+	coreusage "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/usage"
 )
 
 func TestDashboardRequestMonitorMiddlewareTracksResponsesRequests(t *testing.T) {
@@ -16,33 +18,22 @@ func TestDashboardRequestMonitorMiddlewareTracksResponsesRequests(t *testing.T) 
 	router := gin.New()
 	router.Use(DashboardRequestMonitorMiddleware(store))
 	router.POST("/v1/responses", func(c *gin.Context) {
-		c.Set("API_REQUEST", []byte("upstream-request"))
-		c.Set("API_RESPONSE", []byte("upstream-response"))
-		c.JSON(http.StatusOK, gin.H{
-			"usage": gin.H{
-				"total_tokens": 67,
-				"input_tokens_details": gin.H{
-					"cached_tokens": 23,
-				},
-				"cache_creation_input_tokens": 11,
-			},
-			"ok": true,
+		dashboard.SetRequestModel(c, "gpt-5.3-codex")
+		dashboard.SetRequestThinkingLevel(c, "medium")
+		dashboard.SetUsageDetail(c, coreusage.Detail{
+			TotalTokens:      67,
+			CachedTokens:     23,
+			CacheWriteTokens: 11,
 		})
+		c.JSON(http.StatusOK, gin.H{"ok": true})
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"model":"gpt-5.3-codex","stream":true}`))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer secret-token")
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
-	}
-
-	live := store.LiveRequests()
-	if len(live) != 0 {
-		t.Fatalf("live requests = %d, want 0", len(live))
 	}
 
 	logs := store.RequestLogs()
@@ -52,14 +43,8 @@ func TestDashboardRequestMonitorMiddlewareTracksResponsesRequests(t *testing.T) 
 	if logs[0].Model != "gpt-5.3-codex" {
 		t.Fatalf("model = %q", logs[0].Model)
 	}
-	if !logs[0].IsStreaming {
-		t.Fatal("expected streaming request")
-	}
-	if got := logs[0].RequestHeaders["Authorization"]; got == "Bearer secret-token" || !strings.HasPrefix(got, "Bearer ") {
-		t.Fatalf("authorization header not masked: %q", got)
-	}
-	if logs[0].UpstreamRequest != "upstream-request" || logs[0].UpstreamResponse != "upstream-response" {
-		t.Fatalf("unexpected upstream data: %+v", logs[0])
+	if logs[0].ThinkingLevel != "medium" {
+		t.Fatalf("thinking level = %q, want medium", logs[0].ThinkingLevel)
 	}
 	if logs[0].CacheReadTokens != 23 {
 		t.Fatalf("cache read tokens = %d, want 23", logs[0].CacheReadTokens)
@@ -69,6 +54,42 @@ func TestDashboardRequestMonitorMiddlewareTracksResponsesRequests(t *testing.T) 
 	}
 	if logs[0].CacheWriteTokens != 11 {
 		t.Fatalf("cache write tokens = %d, want 11", logs[0].CacheWriteTokens)
+	}
+	if logs[0].ResponseBody != "" {
+		t.Fatalf("unexpected response body for success: %q", logs[0].ResponseBody)
+	}
+}
+
+func TestDashboardRequestMonitorMiddlewareRetainsErrorResponseBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	store := dashboard.NewRequestMonitor(20)
+	router := gin.New()
+	router.Use(DashboardRequestMonitorMiddleware(store))
+	router.POST("/v1/responses", func(c *gin.Context) {
+		dashboard.SetRequestModel(c, "gpt-5.3-codex")
+		c.JSON(http.StatusBadGateway, gin.H{
+			"error": gin.H{
+				"message": "upstream timeout",
+			},
+		})
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	logs := store.RequestLogs()
+	if len(logs) != 1 {
+		t.Fatalf("logs = %d, want 1", len(logs))
+	}
+	if logs[0].StatusCode != http.StatusBadGateway {
+		t.Fatalf("status = %d, want %d", logs[0].StatusCode, http.StatusBadGateway)
+	}
+	if logs[0].ErrorMessage != "upstream timeout" {
+		t.Fatalf("error message = %q, want %q", logs[0].ErrorMessage, "upstream timeout")
+	}
+	if logs[0].ResponseBody == "" {
+		t.Fatal("expected response body for failed request")
 	}
 }
 
@@ -87,5 +108,70 @@ func TestDashboardRequestMonitorMiddlewareSkipsOtherRoutes(t *testing.T) {
 
 	if got := len(store.RequestLogs()); got != 0 {
 		t.Fatalf("logs = %d, want 0", got)
+	}
+}
+
+func TestDashboardRequestMonitorMiddlewareTruncatesLargeErrorResponseBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	store := dashboard.NewRequestMonitor(20)
+	router := gin.New()
+	router.Use(DashboardRequestMonitorMiddleware(store))
+	router.POST("/v1/responses", func(c *gin.Context) {
+		dashboard.SetRequestModel(c, "gpt-5.3-codex")
+		c.Data(http.StatusBadGateway, "application/json", []byte(fmt.Sprintf(`{"error":{"message":"boom"},"payload":"%s"}`, strings.Repeat("x", maxDashboardErrorBodyBytes))))
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	logs := store.RequestLogs()
+	if len(logs) != 1 {
+		t.Fatalf("logs = %d, want 1", len(logs))
+	}
+	if !strings.Contains(logs[0].ResponseBody, "[truncated]") {
+		t.Fatalf("response body should be truncated: %q", logs[0].ResponseBody)
+	}
+	if len(logs[0].ResponseBody) > maxDashboardErrorBodyBytes+len(dashboardTruncatedBodySuffix) {
+		t.Fatalf("response body length = %d, want <= %d", len(logs[0].ResponseBody), maxDashboardErrorBodyBytes+len(dashboardTruncatedBodySuffix))
+	}
+}
+
+func TestDashboardRequestMonitorMiddlewarePublishesLiveMetadataFromHandler(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	store := dashboard.NewRequestMonitor(20)
+	subID, stream := store.Subscribe(8)
+	defer store.Unsubscribe(subID)
+
+	router := gin.New()
+	router.Use(DashboardRequestMonitorMiddleware(store))
+	router.POST("/v1/responses", func(c *gin.Context) {
+		dashboard.SetRequestModel(c, "gpt-5.3-codex(high)")
+		dashboard.SetRequestThinkingLevel(c, "high")
+		dashboard.PublishRequestLiveInfo(c)
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	var updated *dashboard.LiveRequest
+	for i := 0; i < 3; i++ {
+		select {
+		case event := <-stream:
+			if event.Type == "live_upsert" && event.Request != nil && event.Request.Model == "gpt-5.3-codex(high)" {
+				req := *event.Request
+				updated = &req
+			}
+		default:
+		}
+	}
+
+	if updated == nil {
+		t.Fatal("expected updated live request payload")
+	}
+	if updated.ThinkingLevel != "high" {
+		t.Fatalf("thinking level = %q, want high", updated.ThinkingLevel)
 	}
 }

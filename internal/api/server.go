@@ -495,9 +495,7 @@ func (s *Server) registerManagementRoutes() {
 	mgmt.Use(s.managementAvailabilityMiddleware(), s.mgmt.Middleware())
 	{
 		mgmt.GET("/usage", s.mgmt.GetUsageStatistics)
-		mgmt.GET("/dashboard/codex/live", s.mgmt.GetCodexLiveRequests)
-		mgmt.GET("/dashboard/codex/logs", s.mgmt.GetCodexRequestLogs)
-		mgmt.GET("/dashboard/codex/logs/:id", s.mgmt.GetCodexRequestLog)
+		mgmt.GET("/dashboard/codex/stream", s.mgmt.StreamCodexRequestLogs)
 		mgmt.GET("/usage/export", s.mgmt.ExportUsageStatistics)
 		mgmt.POST("/usage/import", s.mgmt.ImportUsageStatistics)
 		mgmt.GET("/config", s.mgmt.GetConfig)

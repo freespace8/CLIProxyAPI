@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/dashboard"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
 	"github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/usage"
 	"github.com/tidwall/gjson"
@@ -73,6 +74,9 @@ func (r *usageReporter) publishWithOutcome(ctx context.Context, detail usage.Det
 		return
 	}
 	r.once.Do(func() {
+		if ginCtx, ok := ctx.Value("gin").(*gin.Context); ok && ginCtx != nil {
+			dashboard.SetUsageDetail(ginCtx, detail)
+		}
 		usage.PublishRecord(ctx, usage.Record{
 			Provider:    r.provider,
 			Model:       r.model,
@@ -96,6 +100,9 @@ func (r *usageReporter) ensurePublished(ctx context.Context) {
 		return
 	}
 	r.once.Do(func() {
+		if ginCtx, ok := ctx.Value("gin").(*gin.Context); ok && ginCtx != nil {
+			dashboard.SetUsageDetail(ginCtx, usage.Detail{})
+		}
 		usage.PublishRecord(ctx, usage.Record{
 			Provider:    r.provider,
 			Model:       r.model,
@@ -188,6 +195,9 @@ func parseCodexUsage(data []byte) (usage.Detail, bool) {
 	if cached := usageNode.Get("input_tokens_details.cached_tokens"); cached.Exists() {
 		detail.CachedTokens = cached.Int()
 	}
+	if cacheWrite := usageNode.Get("cache_creation_input_tokens"); cacheWrite.Exists() {
+		detail.CacheWriteTokens = cacheWrite.Int()
+	}
 	if reasoning := usageNode.Get("output_tokens_details.reasoning_tokens"); reasoning.Exists() {
 		detail.ReasoningTokens = reasoning.Int()
 	}
@@ -219,6 +229,9 @@ func parseOpenAIUsage(data []byte) usage.Detail {
 	if cached.Exists() {
 		detail.CachedTokens = cached.Int()
 	}
+	if cacheWrite := usageNode.Get("cache_creation_input_tokens"); cacheWrite.Exists() {
+		detail.CacheWriteTokens = cacheWrite.Int()
+	}
 	reasoning := usageNode.Get("completion_tokens_details.reasoning_tokens")
 	if !reasoning.Exists() {
 		reasoning = usageNode.Get("output_tokens_details.reasoning_tokens")
@@ -246,6 +259,9 @@ func parseOpenAIStreamUsage(line []byte) (usage.Detail, bool) {
 	if cached := usageNode.Get("prompt_tokens_details.cached_tokens"); cached.Exists() {
 		detail.CachedTokens = cached.Int()
 	}
+	if cacheWrite := usageNode.Get("cache_creation_input_tokens"); cacheWrite.Exists() {
+		detail.CacheWriteTokens = cacheWrite.Int()
+	}
 	if reasoning := usageNode.Get("completion_tokens_details.reasoning_tokens"); reasoning.Exists() {
 		detail.ReasoningTokens = reasoning.Int()
 	}
@@ -262,10 +278,7 @@ func parseClaudeUsage(data []byte) usage.Detail {
 		OutputTokens: usageNode.Get("output_tokens").Int(),
 		CachedTokens: usageNode.Get("cache_read_input_tokens").Int(),
 	}
-	if detail.CachedTokens == 0 {
-		// fall back to creation tokens when read tokens are absent
-		detail.CachedTokens = usageNode.Get("cache_creation_input_tokens").Int()
-	}
+	detail.CacheWriteTokens = usageNode.Get("cache_creation_input_tokens").Int()
 	detail.TotalTokens = detail.InputTokens + detail.OutputTokens
 	return detail
 }
@@ -284,9 +297,7 @@ func parseClaudeStreamUsage(line []byte) (usage.Detail, bool) {
 		OutputTokens: usageNode.Get("output_tokens").Int(),
 		CachedTokens: usageNode.Get("cache_read_input_tokens").Int(),
 	}
-	if detail.CachedTokens == 0 {
-		detail.CachedTokens = usageNode.Get("cache_creation_input_tokens").Int()
-	}
+	detail.CacheWriteTokens = usageNode.Get("cache_creation_input_tokens").Int()
 	detail.TotalTokens = detail.InputTokens + detail.OutputTokens
 	return detail, true
 }

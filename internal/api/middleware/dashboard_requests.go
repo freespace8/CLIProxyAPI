@@ -2,7 +2,6 @@ package middleware
 
 import (
 	"bytes"
-	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -11,14 +10,19 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/dashboard"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/interfaces"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/logging"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/util"
 	"github.com/tidwall/gjson"
+)
+
+const (
+	maxDashboardErrorBodyBytes   = 10 * 1024
+	dashboardTruncatedBodySuffix = "\n...[truncated]"
 )
 
 type dashboardResponseWriter struct {
 	gin.ResponseWriter
 	body       bytes.Buffer
 	statusCode int
+	truncated  bool
 }
 
 func (w *dashboardResponseWriter) WriteHeader(statusCode int) {
@@ -30,7 +34,9 @@ func (w *dashboardResponseWriter) Write(data []byte) (int, error) {
 	if w.statusCode == 0 {
 		w.statusCode = http.StatusOK
 	}
-	_, _ = w.body.Write(data)
+	if shouldCaptureDashboardErrorBody(w.statusCode) {
+		w.captureBody(data)
+	}
 	return w.ResponseWriter.Write(data)
 }
 
@@ -38,8 +44,44 @@ func (w *dashboardResponseWriter) WriteString(data string) (int, error) {
 	if w.statusCode == 0 {
 		w.statusCode = http.StatusOK
 	}
-	w.body.WriteString(data)
+	if shouldCaptureDashboardErrorBody(w.statusCode) {
+		w.captureBody([]byte(data))
+	}
 	return w.ResponseWriter.WriteString(data)
+}
+
+func (w *dashboardResponseWriter) captureBody(data []byte) {
+	if len(data) == 0 || w == nil {
+		return
+	}
+	if w.body.Len() >= maxDashboardErrorBodyBytes {
+		w.truncated = true
+		return
+	}
+	remaining := maxDashboardErrorBodyBytes - w.body.Len()
+	if remaining <= 0 {
+		w.truncated = true
+		return
+	}
+	if len(data) > remaining {
+		data = data[:remaining]
+		w.truncated = true
+	}
+	_, _ = w.body.Write(data)
+}
+
+func (w *dashboardResponseWriter) capturedResponseBody() string {
+	if w == nil {
+		return ""
+	}
+	body := strings.TrimSpace(w.body.String())
+	if !w.truncated {
+		return body
+	}
+	if body == "" {
+		return strings.TrimSpace(dashboardTruncatedBodySuffix)
+	}
+	return body + dashboardTruncatedBodySuffix
 }
 
 func DashboardRequestMonitorMiddleware(store *dashboard.RequestMonitor) gin.HandlerFunc {
@@ -49,116 +91,54 @@ func DashboardRequestMonitorMiddleware(store *dashboard.RequestMonitor) gin.Hand
 			return
 		}
 
-		requestInfo, ok := captureDashboardRequest(c)
-		if !ok {
-			c.Next()
-			return
+		requestID := strings.TrimSpace(logging.GetGinRequestID(c))
+		if requestID == "" {
+			requestID = logging.GenerateRequestID()
+			logging.SetGinRequestID(c, requestID)
 		}
+		startedAt := time.Now()
 
 		writer := &dashboardResponseWriter{ResponseWriter: c.Writer}
 		c.Writer = writer
-		store.Start(requestInfo)
+		dashboard.BindRequestMonitor(c, store)
+
+		store.Start(dashboard.StartRecord{
+			RequestID:     requestID,
+			Model:         dashboard.RequestModel(c),
+			ThinkingLevel: dashboard.RequestThinkingLevel(c),
+			StartedAt:     startedAt,
+		})
 		c.Next()
 
-		completedAt := time.Now()
 		statusCode := writer.statusCode
 		if statusCode == 0 {
 			statusCode = c.Writer.Status()
 		}
+		if statusCode > 0 && statusCode < http.StatusBadRequest {
+			logging.SkipGinRequestLogging(c)
+		}
 		store.Complete(dashboard.CompleteRecord{
-			RequestID:        requestInfo.RequestID,
-			StatusCode:       statusCode,
-			ResponseBody:     writer.body.String(),
-			UpstreamRequest:  string(contextBytes(c, "API_REQUEST")),
-			UpstreamResponse: string(contextBytes(c, "API_RESPONSE")),
-			ErrorMessage:     resolveDashboardError(statusCode, writer.body.Bytes(), contextErrors(c)),
-			CompletedAt:      completedAt,
+			RequestID:     requestID,
+			Model:         dashboard.RequestModel(c),
+			ThinkingLevel: dashboard.RequestThinkingLevel(c),
+			StatusCode:    statusCode,
+			ResponseBody:  writer.capturedResponseBody(),
+			ErrorMessage:  resolveDashboardError(statusCode, writer.body.Bytes(), contextErrors(c)),
+			UsageDetail:   dashboard.UsageDetail(c),
+			CompletedAt:   time.Now(),
 		})
 	}
-}
-
-func captureDashboardRequest(c *gin.Context) (dashboard.StartRecord, bool) {
-	if c == nil || c.Request == nil || c.Request.URL == nil {
-		return dashboard.StartRecord{}, false
-	}
-	requestID := strings.TrimSpace(logging.GetGinRequestID(c))
-	if requestID == "" {
-		requestID = logging.GenerateRequestID()
-		logging.SetGinRequestID(c, requestID)
-	}
-
-	body, ok := readDashboardBody(c.Request)
-	if !ok {
-		return dashboard.StartRecord{}, false
-	}
-	return dashboard.StartRecord{
-		RequestID:      requestID,
-		RequestMethod:  c.Request.Method,
-		RequestURL:     maskedRequestURL(c),
-		RequestHeaders: maskedRequestHeaders(c.Request.Header),
-		RequestBody:    string(body),
-		StartedAt:      time.Now(),
-	}, true
-}
-
-func readDashboardBody(req *http.Request) ([]byte, bool) {
-	if req == nil || req.Body == nil {
-		return nil, true
-	}
-	body, err := io.ReadAll(req.Body)
-	if err != nil {
-		return nil, false
-	}
-	req.Body = io.NopCloser(bytes.NewReader(body))
-	return body, true
-}
-
-func maskedRequestURL(c *gin.Context) string {
-	maskedQuery := util.MaskSensitiveQuery(c.Request.URL.RawQuery)
-	if maskedQuery == "" {
-		return c.Request.URL.Path
-	}
-	return c.Request.URL.Path + "?" + maskedQuery
-}
-
-func maskedRequestHeaders(headers http.Header) map[string]string {
-	if len(headers) == 0 {
-		return map[string]string{}
-	}
-	result := make(map[string]string, len(headers))
-	for key, values := range headers {
-		result[key] = util.MaskSensitiveHeaderValue(key, strings.Join(values, ", "))
-	}
-	return result
 }
 
 func shouldTrackDashboardRequest(req *http.Request) bool {
 	if req == nil || req.URL == nil {
 		return false
 	}
-	path := strings.TrimSpace(req.URL.Path)
-	if path == "/v1/responses" || path == "/v1/responses/compact" {
-		return true
-	}
-	if !strings.HasPrefix(path, "/api/provider/") {
+	if req.Method != http.MethodPost {
 		return false
 	}
-	return strings.HasSuffix(path, "/responses") || strings.HasSuffix(path, "/v1/responses")
-}
-
-func contextBytes(c *gin.Context, key string) []byte {
-	if c == nil {
-		return nil
-	}
-	raw, exists := c.Get(key)
-	if !exists {
-		return nil
-	}
-	value, ok := raw.([]byte)
-	if !ok || len(value) == 0 {
-		return nil
-	}
-	return bytes.Clone(value)
+	path := strings.TrimSpace(req.URL.Path)
+	return path == "/v1/responses" || path == "/v1/responses/compact"
 }
 
 func contextErrors(c *gin.Context) []*interfaces.ErrorMessage {
@@ -192,4 +172,8 @@ func resolveDashboardError(statusCode int, responseBody []byte, apiErrors []*int
 		return message
 	}
 	return strings.TrimSpace(string(responseBody))
+}
+
+func shouldCaptureDashboardErrorBody(statusCode int) bool {
+	return statusCode >= http.StatusBadRequest
 }

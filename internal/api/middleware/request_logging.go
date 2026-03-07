@@ -40,6 +40,10 @@ func RequestLoggingMiddleware(logger logging.RequestLogger) gin.HandlerFunc {
 		}
 
 		loggerEnabled := logger.IsEnabled()
+		if shouldBypassRequestLogging(loggerEnabled, c.Request) {
+			c.Next()
+			return
+		}
 
 		// Capture request information
 		requestInfo, err := captureRequestInfo(c, shouldCaptureRequestBody(loggerEnabled, c.Request))
@@ -66,6 +70,13 @@ func RequestLoggingMiddleware(logger logging.RequestLogger) gin.HandlerFunc {
 			// In a real implementation, you might want to use a proper logger here
 		}
 	}
+}
+
+func shouldBypassRequestLogging(loggerEnabled bool, req *http.Request) bool {
+	if loggerEnabled || req == nil || req.URL == nil {
+		return false
+	}
+	return isResponsesHotPath(req.URL.Path)
 }
 
 func shouldSkipMethodForRequestLogging(req *http.Request) bool {
@@ -102,7 +113,17 @@ func shouldCaptureRequestBody(loggerEnabled bool, req *http.Request) bool {
 	if req.ContentLength <= 0 {
 		return false
 	}
+	if req.URL != nil {
+		if isResponsesHotPath(req.URL.Path) {
+			return false
+		}
+	}
 	return req.ContentLength <= maxErrorOnlyCapturedRequestBodyBytes
+}
+
+func isResponsesHotPath(path string) bool {
+	path = strings.TrimSpace(path)
+	return path == "/v1/responses" || path == "/v1/responses/compact"
 }
 
 // captureRequestInfo extracts relevant information from the incoming HTTP request.

@@ -1,67 +1,64 @@
 package dashboard
 
-import "time"
+import (
+	"time"
+
+	coreusage "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/usage"
+)
 
 const DefaultLogCapacity = 20
 
 type LiveRequest struct {
 	RequestID     string    `json:"requestId"`
-	RequestMethod string    `json:"requestMethod"`
-	RequestURL    string    `json:"requestUrl"`
 	Model         string    `json:"model"`
-	Reasoning     string    `json:"reasoning"`
+	ThinkingLevel string    `json:"thinkingLevel,omitempty"`
 	StartTime     time.Time `json:"startTime"`
-	IsStreaming   bool      `json:"isStreaming"`
 }
 
 type RequestLogRecord struct {
-	ID               int64             `json:"id"`
-	RequestID        string            `json:"requestId"`
-	RequestMethod    string            `json:"requestMethod"`
-	RequestURL       string            `json:"requestUrl"`
-	RequestHeaders   map[string]string `json:"requestHeaders"`
-	RequestBody      string            `json:"requestBody"`
-	ResponseBody     string            `json:"responseBody"`
-	UpstreamRequest  string            `json:"upstreamRequest"`
-	UpstreamResponse string            `json:"upstreamResponse"`
-	Timestamp        time.Time         `json:"timestamp"`
-	DurationMs       int64             `json:"durationMs"`
-	TotalTokens      int64             `json:"totalTokens"`
-	CacheReadTokens  int64             `json:"cacheReadTokens"`
-	CacheWriteTokens int64             `json:"cacheWriteTokens"`
-	StatusCode       int               `json:"statusCode"`
-	Success          bool              `json:"success"`
-	Model            string            `json:"model"`
-	Reasoning        string            `json:"reasoning"`
-	ErrorMessage     string            `json:"errorMessage,omitempty"`
-	IsStreaming      bool              `json:"isStreaming"`
+	ID               int64     `json:"id"`
+	Timestamp        time.Time `json:"timestamp"`
+	DurationMs       int64     `json:"durationMs"`
+	TotalTokens      int64     `json:"totalTokens"`
+	CacheReadTokens  int64     `json:"cacheReadTokens"`
+	CacheWriteTokens int64     `json:"cacheWriteTokens"`
+	StatusCode       int       `json:"statusCode"`
+	Success          bool      `json:"success"`
+	Model            string    `json:"model"`
+	ThinkingLevel    string    `json:"thinkingLevel,omitempty"`
+	ErrorMessage     string    `json:"errorMessage,omitempty"`
+	ResponseBody     string    `json:"responseBody,omitempty"`
 }
 
 type StartRecord struct {
-	RequestID      string
-	RequestMethod  string
-	RequestURL     string
-	RequestHeaders map[string]string
-	RequestBody    string
-	StartedAt      time.Time
+	RequestID     string
+	Model         string
+	ThinkingLevel string
+	StartedAt     time.Time
+}
+
+type UpdateRecord struct {
+	RequestID     string
+	Model         string
+	ThinkingLevel string
 }
 
 type CompleteRecord struct {
-	RequestID        string
-	StatusCode       int
-	ResponseBody     string
-	UpstreamRequest  string
-	UpstreamResponse string
-	ErrorMessage     string
-	CompletedAt      time.Time
+	RequestID     string
+	Model         string
+	ThinkingLevel string
+	StatusCode    int
+	ResponseBody  string
+	ErrorMessage  string
+	UsageDetail   coreusage.Detail
+	CompletedAt   time.Time
 }
 
-type LiveRequestsResponse struct {
-	Requests []LiveRequest `json:"requests"`
-	Count    int           `json:"count"`
-}
-
-type RequestLogsResponse struct {
-	Logs  []RequestLogRecord `json:"logs"`
-	Total int                `json:"total"`
+type MonitorStreamEvent struct {
+	Type      string             `json:"type"`
+	RequestID string             `json:"requestId,omitempty"`
+	Request   *LiveRequest       `json:"request,omitempty"`
+	Requests  []LiveRequest      `json:"requests,omitempty"`
+	Log       *RequestLogRecord  `json:"log,omitempty"`
+	Logs      []RequestLogRecord `json:"logs,omitempty"`
 }
