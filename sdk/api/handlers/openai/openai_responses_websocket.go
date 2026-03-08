@@ -3,7 +3,7 @@ package openai
 import (
 	"bytes"
 	"context"
-	"encoding/json"
+	stdjson "encoding/json"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/interfaces"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/jsonfast"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/registry"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/thinking"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/util"
@@ -561,17 +562,17 @@ func mergeJSONArrayRaw(existingRaw, appendRaw string) (string, error) {
 		appendRaw = "[]"
 	}
 
-	var existing []json.RawMessage
-	if err := json.Unmarshal([]byte(existingRaw), &existing); err != nil {
+	var existing []stdjson.RawMessage
+	if err := jsonfast.Unmarshal([]byte(existingRaw), &existing); err != nil {
 		return "", err
 	}
-	var appendItems []json.RawMessage
-	if err := json.Unmarshal([]byte(appendRaw), &appendItems); err != nil {
+	var appendItems []stdjson.RawMessage
+	if err := jsonfast.Unmarshal([]byte(appendRaw), &appendItems); err != nil {
 		return "", err
 	}
 
 	merged := append(existing, appendItems...)
-	out, err := json.Marshal(merged)
+	out, err := jsonfast.Marshal(merged)
 	if err != nil {
 		return "", err
 	}
@@ -729,7 +730,7 @@ func websocketJSONPayloadsFromChunk(chunk []byte) [][]byte {
 		if len(line) == 0 || bytes.Equal(line, []byte(wsDoneMarker)) {
 			continue
 		}
-		if json.Valid(line) {
+		if stdjson.Valid(line) {
 			payloads = append(payloads, bytes.Clone(line))
 		}
 	}
@@ -742,7 +743,7 @@ func websocketJSONPayloadsFromChunk(chunk []byte) [][]byte {
 	if bytes.HasPrefix(trimmed, []byte("data:")) {
 		trimmed = bytes.TrimSpace(trimmed[len("data:"):])
 	}
-	if len(trimmed) > 0 && !bytes.Equal(trimmed, []byte(wsDoneMarker)) && json.Valid(trimmed) {
+	if len(trimmed) > 0 && !bytes.Equal(trimmed, []byte(wsDoneMarker)) && stdjson.Valid(trimmed) {
 		payloads = append(payloads, bytes.Clone(trimmed))
 	}
 	return payloads
@@ -795,7 +796,7 @@ func writeResponsesWebsocketError(conn *websocket.Conn, errMsg *interfaces.Error
 		}
 	}
 
-	if len(body) > 0 && json.Valid(body) {
+	if len(body) > 0 && stdjson.Valid(body) {
 		errorNode := gjson.GetBytes(body, "error")
 		if errorNode.Exists() {
 			payload, errSet = sjson.SetRawBytes(payload, "error", []byte(errorNode.Raw))

@@ -734,7 +734,14 @@ func (h *BaseAPIHandler) ExecuteStreamWithAuthManager(ctx context.Context, handl
 }
 
 func validateSSEDataJSON(chunk []byte) error {
-	for _, line := range bytes.Split(chunk, []byte("\n")) {
+	for len(chunk) > 0 {
+		line := chunk
+		if idx := bytes.IndexByte(chunk, '\n'); idx >= 0 {
+			line = chunk[:idx]
+			chunk = chunk[idx+1:]
+		} else {
+			chunk = nil
+		}
 		line = bytes.TrimSpace(line)
 		if len(line) == 0 {
 			continue
