@@ -390,7 +390,7 @@ function LogsTable(props: {
   logs: RequestLogRecord[]
   onOpenError: (log: RequestLogRecord) => void
 }) {
-  const desktopGridClassName = 'grid w-full grid-cols-[minmax(0,1.15fr)_minmax(0,1.45fr)_minmax(0,1.2fr)_minmax(140px,1.25fr)_minmax(64px,0.65fr)_minmax(64px,0.7fr)_minmax(64px,0.7fr)] items-center gap-3 lg:gap-4'
+  const desktopGridClassName = 'grid w-full grid-cols-[minmax(0,1.05fr)_minmax(0,1.35fr)_minmax(72px,0.78fr)_minmax(180px,1.7fr)_minmax(64px,0.62fr)_minmax(64px,0.66fr)_minmax(64px,0.66fr)] items-center gap-3 lg:gap-4'
 
   return (
     <>
@@ -414,6 +414,7 @@ function LogsTable(props: {
         {props.logs.length === 0 ? <p className="px-2 py-8 text-sm text-muted-foreground">最近还没有 Codex 请求日志。</p> : null}
         {props.logs.map((log) => {
           const modelLabel = formatModelWithThinking(log.model, log.thinkingLevel, log.serviceTier)
+          const performanceLabel = formatPerformance(log)
 
           return (
             <div className={`${desktopGridClassName} border-b px-2 py-4 last:border-b-0`} key={log.id}>
@@ -435,7 +436,7 @@ function LogsTable(props: {
                   </button>
                 )}
               </span>
-              <span className="truncate font-mono text-xs">{formatPerformance(log)}</span>
+              <span className="truncate font-mono text-xs" title={performanceLabel}>{performanceLabel}</span>
               <span className="truncate font-mono text-xs">{formatTokenCount(log.totalTokens)}</span>
               <span className="truncate font-mono text-xs">{formatTokenCount(log.cacheReadTokens)}</span>
               <span className="truncate font-mono text-xs">{formatTokenCount(log.cacheWriteTokens)}</span>
