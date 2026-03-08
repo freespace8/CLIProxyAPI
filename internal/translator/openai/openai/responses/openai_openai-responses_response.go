@@ -533,13 +533,12 @@ func appendJSONRawField(buf []byte, field string, raw string) []byte {
 	return buf
 }
 
-func buildCompletedRequestFields(requestRawJSON []byte) string {
-	if len(requestRawJSON) == 0 {
+func buildCompletedRequestFieldsFromResult(req gjson.Result) string {
+	if !req.Exists() {
 		return ""
 	}
 
-	req := gjson.ParseBytes(requestRawJSON)
-	buf := make([]byte, 0, len(requestRawJSON))
+	buf := make([]byte, 0, len(req.Raw))
 
 	if v := req.Get("instructions"); v.Exists() {
 		buf = appendJSONStringField(buf, "instructions", v.String())
@@ -603,6 +602,13 @@ func buildCompletedRequestFields(requestRawJSON []byte) string {
 	}
 
 	return string(buf)
+}
+
+func buildCompletedRequestFields(requestRawJSON []byte) string {
+	if len(requestRawJSON) == 0 {
+		return ""
+	}
+	return buildCompletedRequestFieldsFromResult(gjson.ParseBytes(requestRawJSON))
 }
 
 func completedPayload(seq int, responseID string, created int64, requestFields string, outputArray string, promptTokens int64, cachedTokens int64, completionTokens int64, totalTokens int64, reasoningTokens int64, usageSeen bool) string {
@@ -1042,15 +1048,18 @@ func ConvertOpenAIChatCompletionsResponseToOpenAIResponsesNonStream(_ context.Co
 	if created == 0 {
 		created = time.Now().Unix()
 	}
-	requestFields := buildCompletedRequestFields(requestRawJSON)
+	var requestRoot gjson.Result
 	if len(requestRawJSON) > 0 {
-		req := gjson.ParseBytes(requestRawJSON)
-		if !req.Get("max_output_tokens").Exists() {
-			if v := req.Get("max_tokens"); v.Exists() {
+		requestRoot = gjson.ParseBytes(requestRawJSON)
+	}
+	requestFields := buildCompletedRequestFieldsFromResult(requestRoot)
+	if len(requestRawJSON) > 0 {
+		if !requestRoot.Get("max_output_tokens").Exists() {
+			if v := requestRoot.Get("max_tokens"); v.Exists() {
 				requestFields = string(appendJSONIntField([]byte(requestFields), "max_output_tokens", v.Int()))
 			}
 		}
-		if !req.Get("model").Exists() {
+		if !requestRoot.Get("model").Exists() {
 			if v := root.Get("model"); v.Exists() {
 				requestFields = string(appendJSONStringField([]byte(requestFields), "model", v.String()))
 			}
