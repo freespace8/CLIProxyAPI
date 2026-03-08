@@ -37,6 +37,13 @@ func TestMergeJSONArrayRaw_InvalidExistingJSON(t *testing.T) {
 	}
 }
 
+func TestMergeJSONArrayRaw_RejectsNonArrayJSON(t *testing.T) {
+	_, err := mergeJSONArrayRaw(`{"id":"msg-1"}`, `[{"id":"assistant-1"}]`)
+	if err == nil {
+		t.Fatal("mergeJSONArrayRaw() error = nil, want non-array error")
+	}
+}
+
 func BenchmarkMergeJSONArrayRaw(b *testing.B) {
 	existing := buildJSONArrayRaw("history", 96)
 	appendRaw := buildJSONArrayRaw("delta", 12)
