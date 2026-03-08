@@ -493,6 +493,47 @@ func completedFunctionItemPayload(itemID string, arguments string, callID string
 	return string(buf)
 }
 
+func appendJSONArrayItemPrefix(buf []byte, hasItems bool) []byte {
+	if !hasItems {
+		return append(buf, '[')
+	}
+	return append(buf, ',')
+}
+
+func appendCompletedReasoningItemPayload(buf []byte, itemID string, text string, hasItems bool) []byte {
+	buf = appendJSONArrayItemPrefix(buf, hasItems)
+	buf = append(buf, `{"id":`...)
+	buf = strconv.AppendQuote(buf, itemID)
+	buf = append(buf, `,"type":"reasoning","summary":[{"type":"summary_text","text":`...)
+	buf = strconv.AppendQuote(buf, text)
+	buf = append(buf, `}]}`...)
+	return buf
+}
+
+func appendCompletedMessageItemPayload(buf []byte, itemID string, text string, hasItems bool) []byte {
+	buf = appendJSONArrayItemPrefix(buf, hasItems)
+	buf = append(buf, `{"id":`...)
+	buf = strconv.AppendQuote(buf, itemID)
+	buf = append(buf, `,"type":"message","status":"completed","content":[{"type":"output_text","annotations":[],"logprobs":[],"text":`...)
+	buf = strconv.AppendQuote(buf, text)
+	buf = append(buf, `}],"role":"assistant"}`...)
+	return buf
+}
+
+func appendCompletedFunctionItemPayload(buf []byte, itemID string, arguments string, callID string, name string, hasItems bool) []byte {
+	buf = appendJSONArrayItemPrefix(buf, hasItems)
+	buf = append(buf, `{"id":`...)
+	buf = strconv.AppendQuote(buf, itemID)
+	buf = append(buf, `,"type":"function_call","status":"completed","arguments":`...)
+	buf = strconv.AppendQuote(buf, arguments)
+	buf = append(buf, `,"call_id":`...)
+	buf = strconv.AppendQuote(buf, callID)
+	buf = append(buf, `,"name":`...)
+	buf = strconv.AppendQuote(buf, name)
+	buf = append(buf, `}`...)
+	return buf
+}
+
 func appendJSONStringField(buf []byte, field string, value string) []byte {
 	buf = append(buf, ',')
 	buf = strconv.AppendQuote(buf, field)
@@ -1106,8 +1147,9 @@ func ConvertOpenAIChatCompletionsResponseToOpenAIResponsesNonStream(_ context.Co
 		requestFields = string(appendJSONStringField(nil, "model", v.String()))
 	}
 
-	// Build output list from choices[...]
-	outputItems := make([]string, 0, 4)
+	// Build output list from choices[...] directly into the final JSON array buffer.
+	outputArray := make([]byte, 0, len(rawJSON)/2)
+	hasOutputItems := false
 	// Detect and capture reasoning content if present
 	rcText := gjson.GetBytes(rawJSON, "choices.0.message.reasoning_content").String()
 	includeReasoning := rcText != ""
@@ -1119,7 +1161,8 @@ func ConvertOpenAIChatCompletionsResponseToOpenAIResponsesNonStream(_ context.Co
 		if strings.HasPrefix(rid, "resp_") {
 			rid = strings.TrimPrefix(rid, "resp_")
 		}
-		outputItems = append(outputItems, completedReasoningItemPayload("rs_"+rid, rcText))
+		outputArray = appendCompletedReasoningItemPayload(outputArray, "rs_"+rid, rcText, hasOutputItems)
+		hasOutputItems = true
 	}
 
 	if choices := root.Get("choices"); choices.Exists() && choices.IsArray() {
@@ -1128,7 +1171,8 @@ func ConvertOpenAIChatCompletionsResponseToOpenAIResponsesNonStream(_ context.Co
 			if msg.Exists() {
 				// Text message part
 				if c := msg.Get("content"); c.Exists() && c.String() != "" {
-					outputItems = append(outputItems, completedMessageItemPayload("msg_"+id+"_"+strconv.Itoa(int(choice.Get("index").Int())), c.String()))
+					outputArray = appendCompletedMessageItemPayload(outputArray, "msg_"+id+"_"+strconv.Itoa(int(choice.Get("index").Int())), c.String(), hasOutputItems)
+					hasOutputItems = true
 				}
 
 				// Function/tool calls
@@ -1137,7 +1181,8 @@ func ConvertOpenAIChatCompletionsResponseToOpenAIResponsesNonStream(_ context.Co
 						callID := tc.Get("id").String()
 						name := tc.Get("function.name").String()
 						args := tc.Get("function.arguments").String()
-						outputItems = append(outputItems, completedFunctionItemPayload("fc_"+callID, args, callID, name))
+						outputArray = appendCompletedFunctionItemPayload(outputArray, "fc_"+callID, args, callID, name, hasOutputItems)
+						hasOutputItems = true
 						return true
 					})
 				}
@@ -1145,6 +1190,9 @@ func ConvertOpenAIChatCompletionsResponseToOpenAIResponsesNonStream(_ context.Co
 			return true
 		})
 	}
+	if hasOutputItems {
+		outputArray = append(outputArray, ']')
+	}
 
-	return nonStreamResponsePayload(id, created, requestFields, jsonArrayFromRawItems(outputItems), root.Get("usage"))
+	return nonStreamResponsePayload(id, created, requestFields, string(outputArray), root.Get("usage"))
 }
