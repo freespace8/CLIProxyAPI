@@ -299,7 +299,7 @@ func normalizeResponseSubsequentRequest(rawJSON []byte, lastRequest []byte, last
 		}
 	}
 
-	mergedInput, errMerge = mergeJSONArrayRaw(mergedInput, nextInput.Raw)
+	mergedInput, errMerge = mergeJSONArrayRawTrusted(mergedInput, nextInput.Raw)
 	if errMerge != nil {
 		return nil, lastRequest, &interfaces.ErrorMessage{
 			StatusCode: http.StatusBadRequest,
