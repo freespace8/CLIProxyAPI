@@ -649,6 +649,45 @@ func completedPayload(seq int, responseID string, created int64, requestFields s
 	return string(buf)
 }
 
+func completedEvent(seq int, responseID string, created int64, requestFields string, outputArray string, promptTokens int64, cachedTokens int64, completionTokens int64, totalTokens int64, reasoningTokens int64, usageSeen bool) string {
+	buf := make([]byte, 0, len(responseID)+len(requestFields)+len(outputArray)+416)
+	buf = appendSSEPrefix(buf, "response.completed")
+	buf = append(buf, `{"type":"response.completed","sequence_number":`...)
+	buf = strconv.AppendInt(buf, int64(seq), 10)
+	buf = append(buf, `,"response":{"id":`...)
+	buf = strconv.AppendQuote(buf, responseID)
+	buf = append(buf, `,"object":"response","created_at":`...)
+	buf = strconv.AppendInt(buf, created, 10)
+	buf = append(buf, `,"status":"completed","background":false,"error":null`...)
+	buf = append(buf, requestFields...)
+	if outputArray != "" {
+		buf = append(buf, `,"output":`...)
+		buf = append(buf, outputArray...)
+	}
+	if usageSeen {
+		total := totalTokens
+		if total == 0 {
+			total = promptTokens + completionTokens
+		}
+		buf = append(buf, `,"usage":{"input_tokens":`...)
+		buf = strconv.AppendInt(buf, promptTokens, 10)
+		buf = append(buf, `,"input_tokens_details":{"cached_tokens":`...)
+		buf = strconv.AppendInt(buf, cachedTokens, 10)
+		buf = append(buf, `},"output_tokens":`...)
+		buf = strconv.AppendInt(buf, completionTokens, 10)
+		if reasoningTokens > 0 {
+			buf = append(buf, `,"output_tokens_details":{"reasoning_tokens":`...)
+			buf = strconv.AppendInt(buf, reasoningTokens, 10)
+			buf = append(buf, '}')
+		}
+		buf = append(buf, `,"total_tokens":`...)
+		buf = strconv.AppendInt(buf, total, 10)
+		buf = append(buf, '}')
+	}
+	buf = append(buf, `}}`...)
+	return string(buf)
+}
+
 func nonStreamResponsePayload(id string, created int64, requestFields string, outputArray string, usage gjson.Result) string {
 	buf := make([]byte, 0, len(id)+len(requestFields)+len(outputArray)+256)
 	buf = append(buf, `{"id":`...)
@@ -1021,8 +1060,7 @@ func ConvertOpenAIChatCompletionsResponseToOpenAIResponses(ctx context.Context, 
 					}
 				}
 				outputArray := jsonArrayFromRawItems(outputItems)
-				completed := completedPayload(nextSeq(), st.ResponseID, st.Created, st.CompletedRequestFields, outputArray, st.PromptTokens, st.CachedTokens, st.CompletionTokens, st.TotalTokens, st.ReasoningTokens, st.UsageSeen)
-				out = append(out, emitRespEvent("response.completed", completed))
+				out = append(out, completedEvent(nextSeq(), st.ResponseID, st.Created, st.CompletedRequestFields, outputArray, st.PromptTokens, st.CachedTokens, st.CompletionTokens, st.TotalTokens, st.ReasoningTokens, st.UsageSeen))
 			}
 
 			return true
