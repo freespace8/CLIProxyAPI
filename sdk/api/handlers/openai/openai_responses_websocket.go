@@ -507,29 +507,33 @@ func writeResponsesWebsocketSyntheticPrewarm(
 func syntheticResponsesWebsocketPrewarmPayloads(requestJSON []byte) ([][]byte, error) {
 	responseID := "resp_prewarm_" + uuid.NewString()
 	createdAt := time.Now().Unix()
-	modelName := strings.TrimSpace(gjson.GetBytes(requestJSON, "model").String())
+	model := gjson.GetBytes(requestJSON, "model")
+	modelRaw := ""
+	if model.Exists() {
+		modelRaw = model.Raw
+	}
 
-	createdPayload := make([]byte, 0, len(responseID)+len(modelName)+160)
+	createdPayload := make([]byte, 0, len(responseID)+len(modelRaw)+160)
 	createdPayload = append(createdPayload, `{"type":"response.created","sequence_number":0,"response":{"id":`...)
 	createdPayload = strconv.AppendQuote(createdPayload, responseID)
 	createdPayload = append(createdPayload, `,"object":"response","created_at":`...)
 	createdPayload = strconv.AppendInt(createdPayload, createdAt, 10)
 	createdPayload = append(createdPayload, `,"status":"in_progress","background":false,"error":null`...)
-	if modelName != "" {
+	if modelRaw != "" {
 		createdPayload = append(createdPayload, `,"model":`...)
-		createdPayload = strconv.AppendQuote(createdPayload, modelName)
+		createdPayload = append(createdPayload, modelRaw...)
 	}
 	createdPayload = append(createdPayload, `,"output":[]}}`...)
 
-	completedPayload := make([]byte, 0, len(responseID)+len(modelName)+208)
+	completedPayload := make([]byte, 0, len(responseID)+len(modelRaw)+208)
 	completedPayload = append(completedPayload, `{"type":"response.completed","sequence_number":1,"response":{"id":`...)
 	completedPayload = strconv.AppendQuote(completedPayload, responseID)
 	completedPayload = append(completedPayload, `,"object":"response","created_at":`...)
 	completedPayload = strconv.AppendInt(completedPayload, createdAt, 10)
 	completedPayload = append(completedPayload, `,"status":"completed","background":false,"error":null`...)
-	if modelName != "" {
+	if modelRaw != "" {
 		completedPayload = append(completedPayload, `,"model":`...)
-		completedPayload = strconv.AppendQuote(completedPayload, modelName)
+		completedPayload = append(completedPayload, modelRaw...)
 	}
 	completedPayload = append(completedPayload, `,"output":[],"usage":{"input_tokens":0,"output_tokens":0,"total_tokens":0}}}`...)
 
