@@ -63,6 +63,13 @@ func emitRespEvent(event string, payload string) string {
 	return builder.String()
 }
 
+func appendSSEPrefix(buf []byte, event string) []byte {
+	buf = append(buf, "event: "...)
+	buf = append(buf, event...)
+	buf = append(buf, "\ndata: "...)
+	return buf
+}
+
 func messageItemID(responseID string, idx int) string {
 	return "msg_" + responseID + "_" + strconv.Itoa(idx)
 }
@@ -200,6 +207,118 @@ func contentPartDonePayload(seq int, itemID string, outputIndex int, text string
 
 func messageOutputItemDonePayload(seq int, itemID string, outputIndex int, text string) string {
 	buf := make([]byte, 0, len(itemID)+len(text)+192)
+	buf = append(buf, `{"type":"response.output_item.done","sequence_number":`...)
+	buf = strconv.AppendInt(buf, int64(seq), 10)
+	buf = append(buf, `,"output_index":`...)
+	buf = strconv.AppendInt(buf, int64(outputIndex), 10)
+	buf = append(buf, `,"item":{"id":`...)
+	buf = strconv.AppendQuote(buf, itemID)
+	buf = append(buf, `,"type":"message","status":"completed","content":[{"type":"output_text","annotations":[],"logprobs":[],"text":`...)
+	buf = strconv.AppendQuote(buf, text)
+	buf = append(buf, `}],"role":"assistant"}}`...)
+	return string(buf)
+}
+
+func responseCreatedEvent(seq int, responseID string, createdAt int64) string {
+	buf := make([]byte, 0, len(responseID)+192)
+	buf = appendSSEPrefix(buf, "response.created")
+	buf = append(buf, `{"type":"response.created","sequence_number":`...)
+	buf = strconv.AppendInt(buf, int64(seq), 10)
+	buf = append(buf, `,"response":{"id":`...)
+	buf = strconv.AppendQuote(buf, responseID)
+	buf = append(buf, `,"object":"response","created_at":`...)
+	buf = strconv.AppendInt(buf, createdAt, 10)
+	buf = append(buf, `,"status":"in_progress","background":false,"error":null,"output":[]}}`...)
+	return string(buf)
+}
+
+func responseInProgressEvent(seq int, responseID string, createdAt int64) string {
+	buf := make([]byte, 0, len(responseID)+168)
+	buf = appendSSEPrefix(buf, "response.in_progress")
+	buf = append(buf, `{"type":"response.in_progress","sequence_number":`...)
+	buf = strconv.AppendInt(buf, int64(seq), 10)
+	buf = append(buf, `,"response":{"id":`...)
+	buf = strconv.AppendQuote(buf, responseID)
+	buf = append(buf, `,"object":"response","created_at":`...)
+	buf = strconv.AppendInt(buf, createdAt, 10)
+	buf = append(buf, `,"status":"in_progress"}}`...)
+	return string(buf)
+}
+
+func messageOutputItemAddedEvent(seq int, itemID string, outputIndex int) string {
+	buf := make([]byte, 0, len(itemID)+192)
+	buf = appendSSEPrefix(buf, "response.output_item.added")
+	buf = append(buf, `{"type":"response.output_item.added","sequence_number":`...)
+	buf = strconv.AppendInt(buf, int64(seq), 10)
+	buf = append(buf, `,"output_index":`...)
+	buf = strconv.AppendInt(buf, int64(outputIndex), 10)
+	buf = append(buf, `,"item":{"id":`...)
+	buf = strconv.AppendQuote(buf, itemID)
+	buf = append(buf, `,"type":"message","status":"in_progress","content":[],"role":"assistant"}}`...)
+	return string(buf)
+}
+
+func contentPartAddedEvent(seq int, itemID string, outputIndex int) string {
+	buf := make([]byte, 0, len(itemID)+216)
+	buf = appendSSEPrefix(buf, "response.content_part.added")
+	buf = append(buf, `{"type":"response.content_part.added","sequence_number":`...)
+	buf = strconv.AppendInt(buf, int64(seq), 10)
+	buf = append(buf, `,"item_id":`...)
+	buf = strconv.AppendQuote(buf, itemID)
+	buf = append(buf, `,"output_index":`...)
+	buf = strconv.AppendInt(buf, int64(outputIndex), 10)
+	buf = append(buf, `,"content_index":0,"part":{"type":"output_text","annotations":[],"logprobs":[],"text":""}}`...)
+	return string(buf)
+}
+
+func outputTextDeltaEvent(seq int, itemID string, outputIndex int, delta string) string {
+	buf := make([]byte, 0, len(itemID)+len(delta)+168)
+	buf = appendSSEPrefix(buf, "response.output_text.delta")
+	buf = append(buf, `{"type":"response.output_text.delta","sequence_number":`...)
+	buf = strconv.AppendInt(buf, int64(seq), 10)
+	buf = append(buf, `,"item_id":`...)
+	buf = strconv.AppendQuote(buf, itemID)
+	buf = append(buf, `,"output_index":`...)
+	buf = strconv.AppendInt(buf, int64(outputIndex), 10)
+	buf = append(buf, `,"content_index":0,"delta":`...)
+	buf = strconv.AppendQuote(buf, delta)
+	buf = append(buf, `,"logprobs":[]}`...)
+	return string(buf)
+}
+
+func outputTextDoneEvent(seq int, itemID string, outputIndex int, text string) string {
+	buf := make([]byte, 0, len(itemID)+len(text)+168)
+	buf = appendSSEPrefix(buf, "response.output_text.done")
+	buf = append(buf, `{"type":"response.output_text.done","sequence_number":`...)
+	buf = strconv.AppendInt(buf, int64(seq), 10)
+	buf = append(buf, `,"item_id":`...)
+	buf = strconv.AppendQuote(buf, itemID)
+	buf = append(buf, `,"output_index":`...)
+	buf = strconv.AppendInt(buf, int64(outputIndex), 10)
+	buf = append(buf, `,"content_index":0,"text":`...)
+	buf = strconv.AppendQuote(buf, text)
+	buf = append(buf, `,"logprobs":[]}`...)
+	return string(buf)
+}
+
+func contentPartDoneEvent(seq int, itemID string, outputIndex int, text string) string {
+	buf := make([]byte, 0, len(itemID)+len(text)+216)
+	buf = appendSSEPrefix(buf, "response.content_part.done")
+	buf = append(buf, `{"type":"response.content_part.done","sequence_number":`...)
+	buf = strconv.AppendInt(buf, int64(seq), 10)
+	buf = append(buf, `,"item_id":`...)
+	buf = strconv.AppendQuote(buf, itemID)
+	buf = append(buf, `,"output_index":`...)
+	buf = strconv.AppendInt(buf, int64(outputIndex), 10)
+	buf = append(buf, `,"content_index":0,"part":{"type":"output_text","annotations":[],"logprobs":[],"text":`...)
+	buf = strconv.AppendQuote(buf, text)
+	buf = append(buf, `}}`...)
+	return string(buf)
+}
+
+func messageOutputItemDoneEvent(seq int, itemID string, outputIndex int, text string) string {
+	buf := make([]byte, 0, len(itemID)+len(text)+232)
+	buf = appendSSEPrefix(buf, "response.output_item.done")
 	buf = append(buf, `{"type":"response.output_item.done","sequence_number":`...)
 	buf = strconv.AppendInt(buf, int64(seq), 10)
 	buf = append(buf, `,"output_index":`...)
@@ -458,11 +577,51 @@ func completedPayload(seq int, responseID string, created int64, requestFields s
 	return string(buf)
 }
 
+func nonStreamResponsePayload(id string, created int64, requestFields string, outputArray string, usage gjson.Result) string {
+	buf := make([]byte, 0, len(id)+len(requestFields)+len(outputArray)+256)
+	buf = append(buf, `{"id":`...)
+	buf = strconv.AppendQuote(buf, id)
+	buf = append(buf, `,"object":"response","created_at":`...)
+	buf = strconv.AppendInt(buf, created, 10)
+	buf = append(buf, `,"status":"completed","background":false,"error":null,"incomplete_details":null`...)
+	buf = append(buf, requestFields...)
+	if outputArray != "" {
+		buf = append(buf, `,"output":`...)
+		buf = append(buf, outputArray...)
+	}
+	if usage.Exists() {
+		if usage.Get("prompt_tokens").Exists() || usage.Get("completion_tokens").Exists() || usage.Get("total_tokens").Exists() {
+			buf = append(buf, `,"usage":{"input_tokens":`...)
+			buf = strconv.AppendInt(buf, usage.Get("prompt_tokens").Int(), 10)
+			if cached := usage.Get("prompt_tokens_details.cached_tokens"); cached.Exists() {
+				buf = append(buf, `,"input_tokens_details":{"cached_tokens":`...)
+				buf = strconv.AppendInt(buf, cached.Int(), 10)
+				buf = append(buf, `}`...)
+			}
+			buf = append(buf, `,"output_tokens":`...)
+			buf = strconv.AppendInt(buf, usage.Get("completion_tokens").Int(), 10)
+			if reasoning := usage.Get("output_tokens_details.reasoning_tokens"); reasoning.Exists() {
+				buf = append(buf, `,"output_tokens_details":{"reasoning_tokens":`...)
+				buf = strconv.AppendInt(buf, reasoning.Int(), 10)
+				buf = append(buf, `}`...)
+			}
+			buf = append(buf, `,"total_tokens":`...)
+			buf = strconv.AppendInt(buf, usage.Get("total_tokens").Int(), 10)
+			buf = append(buf, `}`...)
+		} else {
+			buf = append(buf, `,"usage":`...)
+			buf = append(buf, usage.Raw...)
+		}
+	}
+	buf = append(buf, '}')
+	return string(buf)
+}
+
 func appendMessageDoneEvents(out []string, responseID string, outputIndex int, text string, nextSeq func() int) []string {
 	itemID := messageItemID(responseID, outputIndex)
-	out = append(out, emitRespEvent("response.output_text.done", outputTextDonePayload(nextSeq(), itemID, outputIndex, text)))
-	out = append(out, emitRespEvent("response.content_part.done", contentPartDonePayload(nextSeq(), itemID, outputIndex, text)))
-	out = append(out, emitRespEvent("response.output_item.done", messageOutputItemDonePayload(nextSeq(), itemID, outputIndex, text)))
+	out = append(out, outputTextDoneEvent(nextSeq(), itemID, outputIndex, text))
+	out = append(out, contentPartDoneEvent(nextSeq(), itemID, outputIndex, text))
+	out = append(out, messageOutputItemDoneEvent(nextSeq(), itemID, outputIndex, text))
 	return out
 }
 
@@ -568,8 +727,8 @@ func ConvertOpenAIChatCompletionsResponseToOpenAIResponses(ctx context.Context, 
 		st.TotalTokens = 0
 		st.ReasoningTokens = 0
 		st.UsageSeen = false
-		out = append(out, emitRespEvent("response.created", responseCreatedPayload(nextSeq(), st.ResponseID, st.Created)))
-		out = append(out, emitRespEvent("response.in_progress", responseInProgressPayload(nextSeq(), st.ResponseID, st.Created)))
+		out = append(out, responseCreatedEvent(nextSeq(), st.ResponseID, st.Created))
+		out = append(out, responseInProgressEvent(nextSeq(), st.ResponseID, st.Created))
 		st.Started = true
 	}
 
@@ -613,15 +772,15 @@ func ConvertOpenAIChatCompletionsResponseToOpenAIResponses(ctx context.Context, 
 					}
 					itemID := messageItemID(st.ResponseID, idx)
 					if !st.MsgItemAdded[idx] {
-						out = append(out, emitRespEvent("response.output_item.added", messageOutputItemAddedPayload(nextSeq(), itemID, idx)))
+						out = append(out, messageOutputItemAddedEvent(nextSeq(), itemID, idx))
 						st.MsgItemAdded[idx] = true
 					}
 					if !st.MsgContentAdded[idx] {
-						out = append(out, emitRespEvent("response.content_part.added", contentPartAddedPayload(nextSeq(), itemID, idx)))
+						out = append(out, contentPartAddedEvent(nextSeq(), itemID, idx))
 						st.MsgContentAdded[idx] = true
 					}
 
-					out = append(out, emitRespEvent("response.output_text.delta", outputTextDeltaPayload(nextSeq(), itemID, idx, contentText)))
+					out = append(out, outputTextDeltaEvent(nextSeq(), itemID, idx, contentText))
 					// aggregate for response.output
 					if st.MsgTextBuf[idx] == nil {
 						st.MsgTextBuf[idx] = &strings.Builder{}
