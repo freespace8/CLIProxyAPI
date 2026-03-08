@@ -753,21 +753,34 @@ func responseCompletedOutputFromPayload(payload []byte) []byte {
 
 func websocketJSONPayloadsFromChunk(chunk []byte) [][]byte {
 	payloads := make([][]byte, 0, 2)
-	lines := bytes.Split(chunk, []byte("\n"))
-	for i := range lines {
-		line := bytes.TrimSpace(lines[i])
+	lineStart := 0
+	for lineStart <= len(chunk) {
+		lineEnd := bytes.IndexByte(chunk[lineStart:], '\n')
+		if lineEnd < 0 {
+			lineEnd = len(chunk)
+		} else {
+			lineEnd += lineStart
+		}
+
+		line := bytes.TrimSpace(chunk[lineStart:lineEnd])
 		if len(line) == 0 || bytes.HasPrefix(line, []byte("event:")) {
-			continue
+			goto nextLine
 		}
 		if bytes.HasPrefix(line, []byte("data:")) {
 			line = bytes.TrimSpace(line[len("data:"):])
 		}
 		if len(line) == 0 || bytes.Equal(line, []byte(wsDoneMarker)) {
-			continue
+			goto nextLine
 		}
 		if stdjson.Valid(line) {
 			payloads = append(payloads, bytes.Clone(line))
 		}
+
+	nextLine:
+		if lineEnd == len(chunk) {
+			break
+		}
+		lineStart = lineEnd + 1
 	}
 
 	if len(payloads) > 0 {
