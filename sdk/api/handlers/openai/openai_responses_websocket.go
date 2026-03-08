@@ -257,40 +257,40 @@ func normalizeResponseSubsequentRequest(rawJSON []byte, lastRequest []byte, last
 		}
 	}
 
-	nextInput := gjson.GetBytes(rawJSON, "input")
+	rawRequest := gjson.ParseBytes(rawJSON)
+	lastNormalizedRequest := gjson.ParseBytes(lastRequest)
+	nextInput := rawRequest.Get("input")
 	if !nextInput.Exists() || !nextInput.IsArray() {
 		return nil, lastRequest, &interfaces.ErrorMessage{
 			StatusCode: http.StatusBadRequest,
 			Error:      fmt.Errorf("websocket request requires array field: input"),
 		}
 	}
+	hasModel := rawRequest.Get("model").Exists()
+	hasInstructions := rawRequest.Get("instructions").Exists()
+	lastModelName := strings.TrimSpace(lastNormalizedRequest.Get("model").String())
+	lastInstructions := lastNormalizedRequest.Get("instructions")
 
 	// Websocket v2 mode uses response.create with previous_response_id + incremental input.
 	// Do not expand it into a full input transcript; upstream expects the incremental payload.
 	if allowIncrementalInputWithPreviousResponseID {
-		if prev := strings.TrimSpace(gjson.GetBytes(rawJSON, "previous_response_id").String()); prev != "" {
+		if prev := strings.TrimSpace(rawRequest.Get("previous_response_id").String()); prev != "" {
 			normalized, errDelete := sjson.DeleteBytes(rawJSON, "type")
 			if errDelete != nil {
 				normalized = bytes.Clone(rawJSON)
 			}
-			if !gjson.GetBytes(normalized, "model").Exists() {
-				modelName := strings.TrimSpace(gjson.GetBytes(lastRequest, "model").String())
-				if modelName != "" {
-					normalized, _ = sjson.SetBytes(normalized, "model", modelName)
-				}
+			if !hasModel && lastModelName != "" {
+				normalized, _ = sjson.SetBytes(normalized, "model", lastModelName)
 			}
-			if !gjson.GetBytes(normalized, "instructions").Exists() {
-				instructions := gjson.GetBytes(lastRequest, "instructions")
-				if instructions.Exists() {
-					normalized, _ = sjson.SetRawBytes(normalized, "instructions", []byte(instructions.Raw))
-				}
+			if !hasInstructions && lastInstructions.Exists() {
+				normalized, _ = sjson.SetRawBytes(normalized, "instructions", []byte(lastInstructions.Raw))
 			}
 			normalized, _ = sjson.SetBytes(normalized, "stream", true)
 			return normalized, bytes.Clone(normalized), nil
 		}
 	}
 
-	existingInput := gjson.GetBytes(lastRequest, "input")
+	existingInput := lastNormalizedRequest.Get("input")
 	mergedInput, errMerge := mergeJSONArrayRaw(existingInput.Raw, normalizeJSONArrayRaw(lastResponseOutput))
 	if errMerge != nil {
 		return nil, lastRequest, &interfaces.ErrorMessage{
@@ -320,17 +320,11 @@ func normalizeResponseSubsequentRequest(rawJSON []byte, lastRequest []byte, last
 			Error:      fmt.Errorf("failed to merge websocket input: %w", errSet),
 		}
 	}
-	if !gjson.GetBytes(normalized, "model").Exists() {
-		modelName := strings.TrimSpace(gjson.GetBytes(lastRequest, "model").String())
-		if modelName != "" {
-			normalized, _ = sjson.SetBytes(normalized, "model", modelName)
-		}
+	if !hasModel && lastModelName != "" {
+		normalized, _ = sjson.SetBytes(normalized, "model", lastModelName)
 	}
-	if !gjson.GetBytes(normalized, "instructions").Exists() {
-		instructions := gjson.GetBytes(lastRequest, "instructions")
-		if instructions.Exists() {
-			normalized, _ = sjson.SetRawBytes(normalized, "instructions", []byte(instructions.Raw))
-		}
+	if !hasInstructions && lastInstructions.Exists() {
+		normalized, _ = sjson.SetRawBytes(normalized, "instructions", []byte(lastInstructions.Raw))
 	}
 	normalized, _ = sjson.SetBytes(normalized, "stream", true)
 	return normalized, bytes.Clone(normalized), nil

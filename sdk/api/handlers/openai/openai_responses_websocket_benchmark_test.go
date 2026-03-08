@@ -78,6 +78,26 @@ func BenchmarkWebsocketJSONPayloadsFromChunk(b *testing.B) {
 	}
 }
 
+func BenchmarkNormalizeResponseSubsequentRequest(b *testing.B) {
+	lastRequest := []byte(`{"model":"test-model","stream":true,"instructions":"be helpful","input":[{"type":"message","id":"msg-1"},{"type":"message","id":"msg-2"}]}`)
+	lastResponseOutput := []byte(`[
+		{"type":"function_call","id":"fc-1","call_id":"call-1","name":"lookup","arguments":"{\"q\":\"cli\"}"},
+		{"type":"message","id":"assistant-1","content":[{"type":"output_text","text":"hello"}]}
+	]`)
+	raw := []byte(`{"type":"response.append","input":[{"type":"message","id":"msg-3"},{"type":"message","id":"msg-4"}]}`)
+
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		normalized, next, errMsg := normalizeResponseSubsequentRequest(raw, lastRequest, lastResponseOutput, false)
+		if errMsg != nil {
+			b.Fatalf("normalizeResponseSubsequentRequest returned error: %v", errMsg.Error)
+		}
+		if len(normalized) == 0 || len(next) == 0 {
+			b.Fatal("normalizeResponseSubsequentRequest returned empty payload")
+		}
+	}
+}
+
 func buildJSONArrayRaw(prefix string, count int) string {
 	if count <= 0 {
 		return "[]"
