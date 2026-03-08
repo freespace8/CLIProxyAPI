@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/dashboard"
@@ -61,6 +62,12 @@ func TestDashboardRequestMonitorMiddlewareTracksResponsesRequests(t *testing.T) 
 	}
 	if logs[0].ResponseBody != "" {
 		t.Fatalf("unexpected response body for success: %q", logs[0].ResponseBody)
+	}
+	if logs[0].FirstTokenMs == nil {
+		t.Fatal("expected first token duration to be recorded")
+	}
+	if *logs[0].FirstTokenMs < 0 || *logs[0].FirstTokenMs > logs[0].DurationMs {
+		t.Fatalf("first token ms = %d, want between 0 and %d", *logs[0].FirstTokenMs, logs[0].DurationMs)
 	}
 }
 
@@ -181,5 +188,39 @@ func TestDashboardRequestMonitorMiddlewarePublishesLiveMetadataFromHandler(t *te
 	}
 	if updated.ServiceTier != "priority" {
 		t.Fatalf("service tier = %q, want priority", updated.ServiceTier)
+	}
+}
+
+func TestDashboardRequestMonitorMiddlewareTracksStreamingFirstTokenBeforeCompletion(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	store := dashboard.NewRequestMonitor(20)
+	router := gin.New()
+	router.Use(DashboardRequestMonitorMiddleware(store))
+	router.POST("/v1/responses", func(c *gin.Context) {
+		c.Header("Content-Type", "text/event-stream")
+		c.Status(http.StatusOK)
+		if _, err := c.Writer.WriteString("data: first\n\n"); err != nil {
+			t.Fatalf("write first chunk: %v", err)
+		}
+		time.Sleep(20 * time.Millisecond)
+		if _, err := c.Writer.WriteString("data: second\n\n"); err != nil {
+			t.Fatalf("write second chunk: %v", err)
+		}
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"stream":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	logs := store.RequestLogs()
+	if len(logs) != 1 {
+		t.Fatalf("logs = %d, want 1", len(logs))
+	}
+	if logs[0].FirstTokenMs == nil {
+		t.Fatal("expected first token duration for streaming request")
+	}
+	if *logs[0].FirstTokenMs >= logs[0].DurationMs {
+		t.Fatalf("first token ms = %d, want < total duration %d", *logs[0].FirstTokenMs, logs[0].DurationMs)
 	}
 }

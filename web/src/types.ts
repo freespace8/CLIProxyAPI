@@ -9,6 +9,7 @@ export interface LiveRequest {
 export interface RequestLogRecord {
   id: number
   timestamp: string
+  firstTokenMs?: number
   durationMs: number
   totalTokens: number
   cacheReadTokens: number

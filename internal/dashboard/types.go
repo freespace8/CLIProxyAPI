@@ -19,6 +19,7 @@ type LiveRequest struct {
 type RequestLogRecord struct {
 	ID               int64     `json:"id"`
 	Timestamp        time.Time `json:"timestamp"`
+	FirstTokenMs     *int64    `json:"firstTokenMs,omitempty"`
 	DurationMs       int64     `json:"durationMs"`
 	TotalTokens      int64     `json:"totalTokens"`
 	CacheReadTokens  int64     `json:"cacheReadTokens"`
@@ -56,6 +57,7 @@ type CompleteRecord struct {
 	ResponseBody  string
 	ErrorMessage  string
 	UsageDetail   coreusage.Detail
+	FirstTokenAt  time.Time
 	CompletedAt   time.Time
 }
 

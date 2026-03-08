@@ -24,8 +24,8 @@ function formatTime(value: string): string {
   }).format(date)
 }
 
-function formatDuration(durationMs: number): string {
-  if (!Number.isFinite(durationMs)) return '--'
+function formatDuration(durationMs?: number): string {
+  if (durationMs == null || !Number.isFinite(durationMs)) return '--'
   if (durationMs < 1000) return `${Math.round(durationMs)}ms`
   return `${(durationMs / 1000).toFixed(2)}s`
 }
@@ -60,6 +60,22 @@ function formatModelWithThinking(model: string, thinkingLevel?: string, serviceT
 function formatTokenCount(value: number): string {
   if (!Number.isFinite(value) || value <= 0) return '--'
   return formatCompactCount(value)
+}
+
+function formatTokensPerSecond(totalTokens: number, durationMs: number): string {
+  if (!Number.isFinite(totalTokens) || totalTokens <= 0) return '--'
+  if (!Number.isFinite(durationMs) || durationMs <= 0) return '--'
+  const tokensPerSecond = totalTokens / (durationMs / 1000)
+  if (!Number.isFinite(tokensPerSecond) || tokensPerSecond <= 0) return '--'
+  return `${formatCompactCount(Math.round(tokensPerSecond))} tok/s`
+}
+
+function formatPerformance(log: RequestLogRecord): string {
+  return [
+    formatDuration(log.firstTokenMs),
+    formatDuration(log.durationMs),
+    formatTokensPerSecond(log.totalTokens, log.durationMs),
+  ].join(' / ')
 }
 
 function formatStatusLabel(log: RequestLogRecord): string {
@@ -360,7 +376,7 @@ function MobileLogCard(props: {
           )}
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
-          <MetricPair label="耗时" value={formatDuration(props.log.durationMs)} valueClassName="font-mono text-xs tabular-nums sm:text-sm" />
+          <MetricPair label="性能" value={formatPerformance(props.log)} valueClassName="font-mono text-xs tabular-nums sm:text-sm" />
           <MetricPair label="总 Token" value={formatTokenCount(props.log.totalTokens)} valueClassName="font-mono text-xs tabular-nums sm:text-sm" />
           <MetricPair label="缓存读取" value={formatTokenCount(props.log.cacheReadTokens)} valueClassName="font-mono text-xs tabular-nums sm:text-sm" />
           <MetricPair label="缓存写入" value={formatTokenCount(props.log.cacheWriteTokens)} valueClassName="font-mono text-xs tabular-nums sm:text-sm" />
@@ -374,7 +390,7 @@ function LogsTable(props: {
   logs: RequestLogRecord[]
   onOpenError: (log: RequestLogRecord) => void
 }) {
-  const desktopGridClassName = 'grid w-full grid-cols-[minmax(0,1.2fr)_minmax(0,1.5fr)_minmax(0,1.4fr)_minmax(72px,0.7fr)_minmax(64px,0.65fr)_minmax(64px,0.7fr)_minmax(64px,0.7fr)] items-center gap-3 lg:gap-4'
+  const desktopGridClassName = 'grid w-full grid-cols-[minmax(0,1.15fr)_minmax(0,1.45fr)_minmax(0,1.2fr)_minmax(140px,1.25fr)_minmax(64px,0.65fr)_minmax(64px,0.7fr)_minmax(64px,0.7fr)] items-center gap-3 lg:gap-4'
 
   return (
     <>
@@ -390,7 +406,7 @@ function LogsTable(props: {
           <span>时间</span>
           <span>模型</span>
           <span>状态</span>
-          <span>耗时</span>
+          <span>性能</span>
           <span>Token</span>
           <span>读缓存</span>
           <span>写缓存</span>
@@ -419,7 +435,7 @@ function LogsTable(props: {
                   </button>
                 )}
               </span>
-              <span className="truncate font-mono text-xs">{formatDuration(log.durationMs)}</span>
+              <span className="truncate font-mono text-xs">{formatPerformance(log)}</span>
               <span className="truncate font-mono text-xs">{formatTokenCount(log.totalTokens)}</span>
               <span className="truncate font-mono text-xs">{formatTokenCount(log.cacheReadTokens)}</span>
               <span className="truncate font-mono text-xs">{formatTokenCount(log.cacheWriteTokens)}</span>

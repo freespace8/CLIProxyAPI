@@ -15,6 +15,29 @@ function formatTime(value: string): string {
   }).format(date)
 }
 
+function formatDuration(durationMs?: number): string {
+  if (durationMs == null || !Number.isFinite(durationMs)) return '--'
+  if (durationMs < 1000) return `${Math.round(durationMs)}ms`
+  return `${(durationMs / 1000).toFixed(2)}s`
+}
+
+function formatTokensPerSecond(totalTokens: number, durationMs: number): string {
+  if (!Number.isFinite(totalTokens) || totalTokens <= 0) return '--'
+  if (!Number.isFinite(durationMs) || durationMs <= 0) return '--'
+  const tokensPerSecond = totalTokens / (durationMs / 1000)
+  if (!Number.isFinite(tokensPerSecond) || tokensPerSecond <= 0) return '--'
+  if (tokensPerSecond >= 1000) return `${(tokensPerSecond / 1000).toFixed(1)}K tok/s`
+  return `${Math.round(tokensPerSecond)} tok/s`
+}
+
+function formatPerformance(detail: RequestLogRecord): string {
+  return [
+    formatDuration(detail.firstTokenMs),
+    formatDuration(detail.durationMs),
+    formatTokensPerSecond(detail.totalTokens, detail.durationMs),
+  ].join(' / ')
+}
+
 function copyText(value: string) {
   if (!value) return
   void navigator.clipboard.writeText(value)
@@ -96,7 +119,7 @@ export function RequestLogDialog(props: { log: RequestLogRecord | null; onClose:
               </div>
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
                 <p className="font-mono">{formatTime(props.log.timestamp)}</p>
-                <p className="font-mono">{Math.round(props.log.durationMs)}ms</p>
+                <p className="font-mono">{`性能 ${formatPerformance(props.log)}`}</p>
                 <p className="font-mono">Tokens {props.log.totalTokens || 0}</p>
               </div>
               <DetailChips detail={props.log} />

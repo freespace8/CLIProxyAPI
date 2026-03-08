@@ -6,6 +6,7 @@ import type { RequestLogRecord } from '../types'
 const failedLog: RequestLogRecord = {
   id: 1,
   timestamp: '2026-03-07T14:00:00.000Z',
+  firstTokenMs: 120,
   durationMs: 320,
   totalTokens: 0,
   cacheReadTokens: 0,
@@ -38,5 +39,11 @@ describe('RequestLogDialog', () => {
     expect(screen.queryByRole('heading', { name: 'responseBody' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '复制响应内容' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '复制 responseBody' })).not.toBeInTheDocument()
+  })
+
+  it('shows first token and total duration separately', () => {
+    render(<RequestLogDialog log={failedLog} onClose={() => {}} />)
+
+    expect(screen.getByText('性能 120ms / 320ms / --')).toBeInTheDocument()
   })
 })

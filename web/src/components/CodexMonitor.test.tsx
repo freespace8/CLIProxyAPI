@@ -79,6 +79,7 @@ describe('CodexMonitor responsive layout', () => {
         logs: [{
           id: 42,
           timestamp: '2026-03-07T14:00:00.000Z',
+          firstTokenMs: 240,
           durationMs: 1820,
           totalTokens: 1536,
           cacheReadTokens: 256,
@@ -99,12 +100,14 @@ describe('CodexMonitor responsive layout', () => {
     expect((await screen.findAllByText('gpt-5-codex medium fast')).length).toBeGreaterThan(0)
 
     await waitFor(() => {
+      expect(screen.getAllByText('性能').length).toBeGreaterThan(0)
       expect(screen.getByText('总 Token')).toBeInTheDocument()
       expect(screen.getByText('缓存读取')).toBeInTheDocument()
       expect(screen.getByText('缓存写入')).toBeInTheDocument()
     })
 
     expect(screen.getAllByText('失败(500)').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('240ms / 1.82s / 844 tok/s').length).toBeGreaterThan(0)
     expect(screen.queryByText('upstream timeout')).not.toBeInTheDocument()
     expect(screen.getByText('读缓存')).toBeInTheDocument()
     expect(screen.getByText('写缓存')).toBeInTheDocument()
@@ -122,6 +125,7 @@ describe('CodexMonitor responsive layout', () => {
         logs: [{
           id: 99,
           timestamp: '2026-03-07T14:00:00.000Z',
+          firstTokenMs: 260,
           durationMs: 920,
           totalTokens: 640,
           cacheReadTokens: 128,

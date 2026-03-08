@@ -20,9 +20,10 @@ const (
 
 type dashboardResponseWriter struct {
 	gin.ResponseWriter
-	body       bytes.Buffer
-	statusCode int
-	truncated  bool
+	firstWriteAt time.Time
+	body         bytes.Buffer
+	statusCode   int
+	truncated    bool
 }
 
 func (w *dashboardResponseWriter) WriteHeader(statusCode int) {
@@ -34,6 +35,7 @@ func (w *dashboardResponseWriter) Write(data []byte) (int, error) {
 	if w.statusCode == 0 {
 		w.statusCode = http.StatusOK
 	}
+	w.captureFirstWriteAt(data)
 	if shouldCaptureDashboardErrorBody(w.statusCode) {
 		w.captureBody(data)
 	}
@@ -44,10 +46,18 @@ func (w *dashboardResponseWriter) WriteString(data string) (int, error) {
 	if w.statusCode == 0 {
 		w.statusCode = http.StatusOK
 	}
+	w.captureFirstWriteAt([]byte(data))
 	if shouldCaptureDashboardErrorBody(w.statusCode) {
 		w.captureBody([]byte(data))
 	}
 	return w.ResponseWriter.WriteString(data)
+}
+
+func (w *dashboardResponseWriter) captureFirstWriteAt(data []byte) {
+	if w == nil || len(data) == 0 || !w.firstWriteAt.IsZero() {
+		return
+	}
+	w.firstWriteAt = time.Now()
 }
 
 func (w *dashboardResponseWriter) captureBody(data []byte) {
@@ -127,6 +137,7 @@ func DashboardRequestMonitorMiddleware(store *dashboard.RequestMonitor) gin.Hand
 			ResponseBody:  writer.capturedResponseBody(),
 			ErrorMessage:  resolveDashboardError(statusCode, writer.body.Bytes(), contextErrors(c)),
 			UsageDetail:   dashboard.UsageDetail(c),
+			FirstTokenAt:  writer.firstWriteAt,
 			CompletedAt:   time.Now(),
 		})
 	}

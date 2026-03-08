@@ -28,7 +28,8 @@ func TestRequestMonitorStoresLightweightLogs(t *testing.T) {
 			CachedTokens:     7,
 			CacheWriteTokens: 3,
 		},
-		CompletedAt: startedAt.Add(250 * time.Millisecond),
+		FirstTokenAt: startedAt.Add(80 * time.Millisecond),
+		CompletedAt:  startedAt.Add(250 * time.Millisecond),
 	})
 
 	logs := monitor.RequestLogs()
@@ -55,6 +56,9 @@ func TestRequestMonitorStoresLightweightLogs(t *testing.T) {
 	}
 	if logs[0].ResponseBody == "" {
 		t.Fatal("expected failed response body to be retained")
+	}
+	if logs[0].FirstTokenMs == nil || *logs[0].FirstTokenMs != 80 {
+		t.Fatalf("first token ms = %v, want 80", logs[0].FirstTokenMs)
 	}
 }
 
@@ -120,8 +124,9 @@ func TestRequestMonitorPublishesSnapshotAndAppend(t *testing.T) {
 	}
 
 	monitor.Complete(CompleteRecord{
-		RequestID:  "req-2",
-		StatusCode: 200,
+		RequestID:    "req-2",
+		StatusCode:   200,
+		FirstTokenAt: startedAt.Add(45 * time.Millisecond),
 		UsageDetail: coreusage.Detail{
 			TotalTokens: 5,
 		},
@@ -143,6 +148,9 @@ func TestRequestMonitorPublishesSnapshotAndAppend(t *testing.T) {
 		}
 		if event.Log.ServiceTier != "priority" {
 			t.Fatalf("service tier = %q, want priority", event.Log.ServiceTier)
+		}
+		if event.Log.FirstTokenMs == nil || *event.Log.FirstTokenMs != 45 {
+			t.Fatalf("first token ms = %v, want 45", event.Log.FirstTokenMs)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("expected append event")

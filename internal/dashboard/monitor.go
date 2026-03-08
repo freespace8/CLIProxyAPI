@@ -149,9 +149,18 @@ func (m *RequestMonitor) Complete(record CompleteRecord) {
 	}
 
 	m.nextID++
+	var firstTokenMs *int64
+	if !record.FirstTokenAt.IsZero() {
+		elapsedMs := record.FirstTokenAt.Sub(snapshot.started).Milliseconds()
+		if elapsedMs < 0 {
+			elapsedMs = 0
+		}
+		firstTokenMs = &elapsedMs
+	}
 	logRecord := RequestLogRecord{
 		ID:               m.nextID,
 		Timestamp:        completedAt,
+		FirstTokenMs:     firstTokenMs,
 		DurationMs:       completedAt.Sub(snapshot.started).Milliseconds(),
 		TotalTokens:      resolveTotalTokens(record.UsageDetail),
 		CacheReadTokens:  record.UsageDetail.CachedTokens,
