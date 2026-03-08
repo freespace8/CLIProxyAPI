@@ -98,6 +98,21 @@ func BenchmarkNormalizeResponseSubsequentRequest(b *testing.B) {
 	}
 }
 
+func BenchmarkNormalizeResponseCreateRequest(b *testing.B) {
+	raw := []byte(`{"type":"response.create","model":"test-model","stream":false,"input":[{"type":"message","id":"msg-1"}]}`)
+
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		normalized, next, errMsg := normalizeResponseCreateRequest(raw)
+		if errMsg != nil {
+			b.Fatalf("normalizeResponseCreateRequest returned error: %v", errMsg.Error)
+		}
+		if len(normalized) == 0 || len(next) == 0 {
+			b.Fatal("normalizeResponseCreateRequest returned empty payload")
+		}
+	}
+}
+
 func buildJSONArrayRaw(prefix string, count int) string {
 	if count <= 0 {
 		return "[]"

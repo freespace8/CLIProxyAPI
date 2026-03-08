@@ -246,7 +246,7 @@ func normalizeResponseCreateRequest(rawJSON []byte) ([]byte, []byte, *interfaces
 			Error:      fmt.Errorf("missing model in response.create request"),
 		}
 	}
-	return normalized, bytes.Clone(normalized), nil
+	return normalized, normalized, nil
 }
 
 func normalizeResponseSubsequentRequest(rawJSON []byte, lastRequest []byte, lastResponseOutput []byte, allowIncrementalInputWithPreviousResponseID bool) ([]byte, []byte, *interfaces.ErrorMessage) {
