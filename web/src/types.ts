@@ -11,6 +11,7 @@ export interface RequestLogRecord {
   timestamp: string
   firstTokenMs?: number
   durationMs: number
+  outputTokens: number
   totalTokens: number
   cacheReadTokens: number
   cacheWriteTokens: number

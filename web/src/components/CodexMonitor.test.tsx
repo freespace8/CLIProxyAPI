@@ -81,6 +81,7 @@ describe('CodexMonitor responsive layout', () => {
           timestamp: '2026-03-07T14:00:00.000Z',
           firstTokenMs: 240,
           durationMs: 1820,
+          outputTokens: 512,
           totalTokens: 1536,
           cacheReadTokens: 256,
           cacheWriteTokens: 64,
@@ -127,6 +128,7 @@ describe('CodexMonitor responsive layout', () => {
           timestamp: '2026-03-07T14:00:00.000Z',
           firstTokenMs: 260,
           durationMs: 920,
+          outputTokens: 330,
           totalTokens: 640,
           cacheReadTokens: 128,
           cacheWriteTokens: 32,
@@ -141,6 +143,7 @@ describe('CodexMonitor responsive layout', () => {
     render(<CodexMonitor accessKey="secret" />)
 
     expect((await screen.findAllByText('gpt-5.4')).length).toBeGreaterThan(0)
+    expect(screen.getAllByText('260ms/920ms/500tok/s').length).toBeGreaterThan(0)
 
     const liveRequestsGrid = screen.getByTestId('live-requests-grid')
     expect(liveRequestsGrid.className).toContain('flex')
@@ -151,5 +154,32 @@ describe('CodexMonitor responsive layout', () => {
 
     expect(desktopTable.className).not.toContain('overflow-x-auto')
     expect(desktopGrid.className).not.toContain('min-w-[940px]')
+  })
+
+  it('computes tok/s from output tokens and generation duration', async () => {
+    openCodexRequestLogStreamMock.mockResolvedValueOnce(streamFromEvents([
+      {
+        type: 'snapshot',
+        requests: [],
+        logs: [{
+          id: 101,
+          timestamp: '2026-03-07T14:00:00.000Z',
+          firstTokenMs: 1110,
+          durationMs: 4580,
+          outputTokens: 37,
+          totalTokens: 181,
+          cacheReadTokens: 113540,
+          cacheWriteTokens: 0,
+          statusCode: 200,
+          success: true,
+          model: 'gpt-5.4',
+          responseBody: '',
+        }],
+      },
+    ]))
+
+    render(<CodexMonitor accessKey="secret" />)
+
+    expect((await screen.findAllByText('1.11s/4.58s/11tok/s')).length).toBeGreaterThan(0)
   })
 })

@@ -3,6 +3,7 @@ import { openCodexRequestLogStream, StreamRequestError } from '../api'
 import { formatCompactCount } from './dashboard/dashboardState'
 import type { LiveRequest, RequestLogRecord, RequestLogStreamEvent } from '../types'
 import { RequestLogDialog } from './RequestLogDialog'
+import { formatRequestLogPerformance } from './requestLogPerformance'
 import { Badge } from './ui/badge'
 
 const MAX_VISIBLE_LOGS = 20
@@ -22,12 +23,6 @@ function formatTime(value: string): string {
     second: '2-digit',
     hour12: false,
   }).format(date)
-}
-
-function formatDuration(durationMs?: number): string {
-  if (durationMs == null || !Number.isFinite(durationMs)) return '--'
-  if (durationMs < 1000) return `${Math.round(durationMs)}ms`
-  return `${(durationMs / 1000).toFixed(2)}s`
 }
 
 function formatElapsed(startTime: string, now: number): string {
@@ -62,21 +57,8 @@ function formatTokenCount(value: number): string {
   return formatCompactCount(value)
 }
 
-function formatTokensPerSecond(totalTokens: number, durationMs: number): string {
-  if (!Number.isFinite(totalTokens) || totalTokens <= 0) return '--'
-  if (!Number.isFinite(durationMs) || durationMs <= 0) return '--'
-  const tokensPerSecond = totalTokens / (durationMs / 1000)
-  if (!Number.isFinite(tokensPerSecond) || tokensPerSecond <= 0) return '--'
-  return `${formatCompactCount(Math.round(tokensPerSecond))}tok/s`
-}
-
 function formatPerformance(log: RequestLogRecord): string {
-  if (!log.success) return '--'
-  return [
-    formatDuration(log.firstTokenMs),
-    formatDuration(log.durationMs),
-    formatTokensPerSecond(log.totalTokens, log.durationMs),
-  ].join('/')
+  return formatRequestLogPerformance(log)
 }
 
 function formatStatusLabel(log: RequestLogRecord): string {

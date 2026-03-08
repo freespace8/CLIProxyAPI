@@ -8,6 +8,7 @@ const failedLog: RequestLogRecord = {
   timestamp: '2026-03-07T14:00:00.000Z',
   firstTokenMs: 120,
   durationMs: 320,
+  outputTokens: 0,
   totalTokens: 0,
   cacheReadTokens: 0,
   cacheWriteTokens: 0,
@@ -16,6 +17,21 @@ const failedLog: RequestLogRecord = {
   model: 'gpt-5.4',
   errorMessage: '{"error":"Invalid API key"}',
   responseBody: '{"error":"Invalid API key"}',
+}
+
+const successLog: RequestLogRecord = {
+  id: 2,
+  timestamp: '2026-03-07T14:00:00.000Z',
+  firstTokenMs: 260,
+  durationMs: 920,
+  outputTokens: 330,
+  totalTokens: 640,
+  cacheReadTokens: 128,
+  cacheWriteTokens: 32,
+  statusCode: 200,
+  success: true,
+  model: 'gpt-5.4',
+  responseBody: '',
 }
 
 describe('RequestLogDialog', () => {
@@ -45,5 +61,11 @@ describe('RequestLogDialog', () => {
     render(<RequestLogDialog log={failedLog} onClose={() => {}} />)
 
     expect(screen.getByText('性能 --')).toBeInTheDocument()
+  })
+
+  it('uses output tokens and generation duration to calculate tok/s', () => {
+    render(<RequestLogDialog log={successLog} onClose={() => {}} />)
+
+    expect(screen.getByText('性能 260ms/920ms/500tok/s')).toBeInTheDocument()
   })
 })

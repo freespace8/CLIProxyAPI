@@ -23,6 +23,7 @@ func TestDashboardRequestMonitorMiddlewareTracksResponsesRequests(t *testing.T) 
 		dashboard.SetRequestThinkingLevel(c, "medium")
 		dashboard.SetRequestServiceTier(c, dashboard.ResolveRequestServiceTier([]byte(`{"service_tier":"priority"}`)))
 		dashboard.SetUsageDetail(c, coreusage.Detail{
+			OutputTokens:     29,
 			TotalTokens:      67,
 			CachedTokens:     23,
 			CacheWriteTokens: 11,
@@ -56,6 +57,9 @@ func TestDashboardRequestMonitorMiddlewareTracksResponsesRequests(t *testing.T) 
 	}
 	if logs[0].TotalTokens != 67 {
 		t.Fatalf("total tokens = %d, want 67", logs[0].TotalTokens)
+	}
+	if logs[0].OutputTokens != 29 {
+		t.Fatalf("output tokens = %d, want 29", logs[0].OutputTokens)
 	}
 	if logs[0].CacheWriteTokens != 11 {
 		t.Fatalf("cache write tokens = %d, want 11", logs[0].CacheWriteTokens)

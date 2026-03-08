@@ -163,6 +163,7 @@ func (m *RequestMonitor) Complete(record CompleteRecord) {
 		FirstTokenMs:     firstTokenMs,
 		DurationMs:       completedAt.Sub(snapshot.started).Milliseconds(),
 		TotalTokens:      resolveTotalTokens(record.UsageDetail),
+		OutputTokens:     record.UsageDetail.OutputTokens,
 		CacheReadTokens:  record.UsageDetail.CachedTokens,
 		CacheWriteTokens: record.UsageDetail.CacheWriteTokens,
 		StatusCode:       record.StatusCode,

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { X } from 'lucide-react'
 import type { RequestLogRecord } from '../types'
+import { formatRequestLogPerformance } from './requestLogPerformance'
 
 function formatTime(value: string): string {
   const date = new Date(value)
@@ -15,28 +16,8 @@ function formatTime(value: string): string {
   }).format(date)
 }
 
-function formatDuration(durationMs?: number): string {
-  if (durationMs == null || !Number.isFinite(durationMs)) return '--'
-  if (durationMs < 1000) return `${Math.round(durationMs)}ms`
-  return `${(durationMs / 1000).toFixed(2)}s`
-}
-
-function formatTokensPerSecond(totalTokens: number, durationMs: number): string {
-  if (!Number.isFinite(totalTokens) || totalTokens <= 0) return '--'
-  if (!Number.isFinite(durationMs) || durationMs <= 0) return '--'
-  const tokensPerSecond = totalTokens / (durationMs / 1000)
-  if (!Number.isFinite(tokensPerSecond) || tokensPerSecond <= 0) return '--'
-  if (tokensPerSecond >= 1000) return `${(tokensPerSecond / 1000).toFixed(1)}Ktok/s`
-  return `${Math.round(tokensPerSecond)}tok/s`
-}
-
 function formatPerformance(detail: RequestLogRecord): string {
-  if (!detail.success) return '--'
-  return [
-    formatDuration(detail.firstTokenMs),
-    formatDuration(detail.durationMs),
-    formatTokensPerSecond(detail.totalTokens, detail.durationMs),
-  ].join('/')
+  return formatRequestLogPerformance(detail)
 }
 
 function copyText(value: string) {

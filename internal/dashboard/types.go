@@ -22,6 +22,7 @@ type RequestLogRecord struct {
 	FirstTokenMs     *int64    `json:"firstTokenMs,omitempty"`
 	DurationMs       int64     `json:"durationMs"`
 	TotalTokens      int64     `json:"totalTokens"`
+	OutputTokens     int64     `json:"outputTokens"`
 	CacheReadTokens  int64     `json:"cacheReadTokens"`
 	CacheWriteTokens int64     `json:"cacheWriteTokens"`
 	StatusCode       int       `json:"statusCode"`

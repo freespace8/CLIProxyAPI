@@ -24,6 +24,7 @@ func TestRequestMonitorStoresLightweightLogs(t *testing.T) {
 		ErrorMessage: "upstream timeout",
 		ResponseBody: `{"error":{"message":"upstream timeout"}}`,
 		UsageDetail: coreusage.Detail{
+			OutputTokens:     6,
 			TotalTokens:      19,
 			CachedTokens:     7,
 			CacheWriteTokens: 3,
@@ -47,6 +48,9 @@ func TestRequestMonitorStoresLightweightLogs(t *testing.T) {
 	}
 	if logs[0].TotalTokens != 19 {
 		t.Fatalf("total tokens = %d, want 19", logs[0].TotalTokens)
+	}
+	if logs[0].OutputTokens != 6 {
+		t.Fatalf("output tokens = %d, want 6", logs[0].OutputTokens)
 	}
 	if logs[0].CacheReadTokens != 7 {
 		t.Fatalf("read tokens = %d, want 7", logs[0].CacheReadTokens)
@@ -128,6 +132,7 @@ func TestRequestMonitorPublishesSnapshotAndAppend(t *testing.T) {
 		StatusCode:   200,
 		FirstTokenAt: startedAt.Add(45 * time.Millisecond),
 		UsageDetail: coreusage.Detail{
+			OutputTokens: 3,
 			TotalTokens: 5,
 		},
 	})
@@ -142,6 +147,9 @@ func TestRequestMonitorPublishesSnapshotAndAppend(t *testing.T) {
 		}
 		if event.Log == nil || event.Log.TotalTokens != 5 {
 			t.Fatalf("unexpected event payload: %+v", event.Log)
+		}
+		if event.Log.OutputTokens != 3 {
+			t.Fatalf("output tokens = %d, want 3", event.Log.OutputTokens)
 		}
 		if event.Log.ThinkingLevel != "high" {
 			t.Fatalf("thinking level = %q, want high", event.Log.ThinkingLevel)
