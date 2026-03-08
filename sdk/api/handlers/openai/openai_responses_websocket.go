@@ -746,7 +746,7 @@ func responseCompletedOutputFromPayload(payload []byte) []byte {
 }
 
 func websocketJSONPayloadsFromChunk(chunk []byte) [][]byte {
-	payloads := make([][]byte, 0, 2)
+	payloads := make([][]byte, 0, 4)
 	lineStart := 0
 	for lineStart <= len(chunk) {
 		lineEnd := bytes.IndexByte(chunk[lineStart:], '\n')
