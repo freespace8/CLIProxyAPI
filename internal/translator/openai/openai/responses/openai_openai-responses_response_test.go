@@ -117,6 +117,7 @@ func TestConvertOpenAIChatCompletionsResponseToOpenAIResponsesEscapesFunctionArg
 
 	var deltaSeen bool
 	var doneSeen bool
+	var completed gjson.Result
 	for _, chunk := range out {
 		event, data := parseOpenAIResponsesSSEChunk(t, chunk)
 		switch event {
@@ -130,6 +131,8 @@ func TestConvertOpenAIChatCompletionsResponseToOpenAIResponsesEscapesFunctionArg
 			if got := data.Get("arguments").String(); got != "{\"q\":\"line1\\n\\\"quoted\\\"\"}" {
 				t.Fatalf("arguments = %q, want %q", got, "{\"q\":\"line1\\n\\\"quoted\\\"\"}")
 			}
+		case "response.completed":
+			completed = data
 		}
 	}
 
@@ -138,6 +141,9 @@ func TestConvertOpenAIChatCompletionsResponseToOpenAIResponsesEscapesFunctionArg
 	}
 	if !doneSeen {
 		t.Fatal("missing response.function_call_arguments.done event")
+	}
+	if got := completed.Get("response.output.0.arguments").String(); got != "{\"q\":\"line1\\n\\\"quoted\\\"\"}" {
+		t.Fatalf("completed arguments = %q, want %q", got, "{\"q\":\"line1\\n\\\"quoted\\\"\"}")
 	}
 }
 

@@ -219,6 +219,40 @@ func functionOutputItemDonePayload(seq int, itemID string, outputIndex int, argu
 	return string(buf)
 }
 
+func completedReasoningItemPayload(itemID string, text string) string {
+	buf := make([]byte, 0, len(itemID)+len(text)+104)
+	buf = append(buf, `{"id":`...)
+	buf = strconv.AppendQuote(buf, itemID)
+	buf = append(buf, `,"type":"reasoning","summary":[{"type":"summary_text","text":`...)
+	buf = strconv.AppendQuote(buf, text)
+	buf = append(buf, `}]}`...)
+	return string(buf)
+}
+
+func completedMessageItemPayload(itemID string, text string) string {
+	buf := make([]byte, 0, len(itemID)+len(text)+160)
+	buf = append(buf, `{"id":`...)
+	buf = strconv.AppendQuote(buf, itemID)
+	buf = append(buf, `,"type":"message","status":"completed","content":[{"type":"output_text","annotations":[],"logprobs":[],"text":`...)
+	buf = strconv.AppendQuote(buf, text)
+	buf = append(buf, `}],"role":"assistant"}`...)
+	return string(buf)
+}
+
+func completedFunctionItemPayload(itemID string, arguments string, callID string, name string) string {
+	buf := make([]byte, 0, len(itemID)+len(arguments)+len(callID)+len(name)+176)
+	buf = append(buf, `{"id":`...)
+	buf = strconv.AppendQuote(buf, itemID)
+	buf = append(buf, `,"type":"function_call","status":"completed","arguments":`...)
+	buf = strconv.AppendQuote(buf, arguments)
+	buf = append(buf, `,"call_id":`...)
+	buf = strconv.AppendQuote(buf, callID)
+	buf = append(buf, `,"name":`...)
+	buf = strconv.AppendQuote(buf, name)
+	buf = append(buf, `}`...)
+	return string(buf)
+}
+
 func appendMessageDoneEvents(out []string, responseID string, outputIndex int, text string, nextSeq func() int) []string {
 	itemID := messageItemID(responseID, outputIndex)
 	out = append(out, emitRespEvent("response.output_text.done", outputTextDonePayload(nextSeq(), itemID, outputIndex, text)))
@@ -607,10 +641,7 @@ func ConvertOpenAIChatCompletionsResponseToOpenAIResponses(ctx context.Context, 
 				outputItems := make([]string, 0, len(st.Reasonings)+len(st.MsgItemAdded)+len(st.FuncArgsBuf))
 				if len(st.Reasonings) > 0 {
 					for _, r := range st.Reasonings {
-						item := `{"id":"","type":"reasoning","summary":[{"type":"summary_text","text":""}]}`
-						item, _ = sjson.Set(item, "id", r.ReasoningID)
-						item, _ = sjson.Set(item, "summary.0.text", r.ReasoningData)
-						outputItems = append(outputItems, item)
+						outputItems = append(outputItems, completedReasoningItemPayload(r.ReasoningID, r.ReasoningData))
 					}
 				}
 				// Append message items in ascending index order
@@ -621,10 +652,7 @@ func ConvertOpenAIChatCompletionsResponseToOpenAIResponses(ctx context.Context, 
 						if b := st.MsgTextBuf[i]; b != nil {
 							txt = b.String()
 						}
-						item := `{"id":"","type":"message","status":"completed","content":[{"type":"output_text","annotations":[],"logprobs":[],"text":""}],"role":"assistant"}`
-						item, _ = sjson.Set(item, "id", messageItemID(st.ResponseID, i))
-						item, _ = sjson.Set(item, "content.0.text", txt)
-						outputItems = append(outputItems, item)
+						outputItems = append(outputItems, completedMessageItemPayload(messageItemID(st.ResponseID, i), txt))
 					}
 				}
 				if len(st.FuncArgsBuf) > 0 {
@@ -636,12 +664,7 @@ func ConvertOpenAIChatCompletionsResponseToOpenAIResponses(ctx context.Context, 
 						}
 						callID := st.FuncCallIDs[i]
 						name := st.FuncNames[i]
-						item := `{"id":"","type":"function_call","status":"completed","arguments":"","call_id":"","name":""}`
-						item, _ = sjson.Set(item, "id", functionItemID(callID))
-						item, _ = sjson.Set(item, "arguments", args)
-						item, _ = sjson.Set(item, "call_id", callID)
-						item, _ = sjson.Set(item, "name", name)
-						outputItems = append(outputItems, item)
+						outputItems = append(outputItems, completedFunctionItemPayload(functionItemID(callID), args, callID, name))
 					}
 				}
 				if outputArray := jsonArrayFromRawItems(outputItems); outputArray != "" {
