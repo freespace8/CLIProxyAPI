@@ -113,6 +113,21 @@ func BenchmarkNormalizeResponseCreateRequest(b *testing.B) {
 	}
 }
 
+func BenchmarkSyntheticResponsesWebsocketPrewarmPayloads(b *testing.B) {
+	requestJSON := []byte(`{"model":"test-model","input":[{"type":"message","id":"msg-1"}]}`)
+
+	b.ReportAllocs()
+	for i := 0; i < b.N; i++ {
+		payloads, err := syntheticResponsesWebsocketPrewarmPayloads(requestJSON)
+		if err != nil {
+			b.Fatalf("syntheticResponsesWebsocketPrewarmPayloads returned error: %v", err)
+		}
+		if len(payloads) != 2 {
+			b.Fatalf("payloads len = %d, want 2", len(payloads))
+		}
+	}
+}
+
 func buildJSONArrayRaw(prefix string, count int) string {
 	if count <= 0 {
 		return "[]"

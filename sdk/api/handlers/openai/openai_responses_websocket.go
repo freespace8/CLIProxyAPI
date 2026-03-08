@@ -509,38 +509,29 @@ func syntheticResponsesWebsocketPrewarmPayloads(requestJSON []byte) ([][]byte, e
 	createdAt := time.Now().Unix()
 	modelName := strings.TrimSpace(gjson.GetBytes(requestJSON, "model").String())
 
-	createdPayload := []byte(`{"type":"response.created","sequence_number":0,"response":{"id":"","object":"response","created_at":0,"status":"in_progress","background":false,"error":null,"output":[]}}`)
-	var errSet error
-	createdPayload, errSet = sjson.SetBytes(createdPayload, "response.id", responseID)
-	if errSet != nil {
-		return nil, errSet
-	}
-	createdPayload, errSet = sjson.SetBytes(createdPayload, "response.created_at", createdAt)
-	if errSet != nil {
-		return nil, errSet
-	}
+	createdPayload := make([]byte, 0, len(responseID)+len(modelName)+160)
+	createdPayload = append(createdPayload, `{"type":"response.created","sequence_number":0,"response":{"id":`...)
+	createdPayload = strconv.AppendQuote(createdPayload, responseID)
+	createdPayload = append(createdPayload, `,"object":"response","created_at":`...)
+	createdPayload = strconv.AppendInt(createdPayload, createdAt, 10)
+	createdPayload = append(createdPayload, `,"status":"in_progress","background":false,"error":null`...)
 	if modelName != "" {
-		createdPayload, errSet = sjson.SetBytes(createdPayload, "response.model", modelName)
-		if errSet != nil {
-			return nil, errSet
-		}
+		createdPayload = append(createdPayload, `,"model":`...)
+		createdPayload = strconv.AppendQuote(createdPayload, modelName)
 	}
+	createdPayload = append(createdPayload, `,"output":[]}}`...)
 
-	completedPayload := []byte(`{"type":"response.completed","sequence_number":1,"response":{"id":"","object":"response","created_at":0,"status":"completed","background":false,"error":null,"output":[],"usage":{"input_tokens":0,"output_tokens":0,"total_tokens":0}}}`)
-	completedPayload, errSet = sjson.SetBytes(completedPayload, "response.id", responseID)
-	if errSet != nil {
-		return nil, errSet
-	}
-	completedPayload, errSet = sjson.SetBytes(completedPayload, "response.created_at", createdAt)
-	if errSet != nil {
-		return nil, errSet
-	}
+	completedPayload := make([]byte, 0, len(responseID)+len(modelName)+208)
+	completedPayload = append(completedPayload, `{"type":"response.completed","sequence_number":1,"response":{"id":`...)
+	completedPayload = strconv.AppendQuote(completedPayload, responseID)
+	completedPayload = append(completedPayload, `,"object":"response","created_at":`...)
+	completedPayload = strconv.AppendInt(completedPayload, createdAt, 10)
+	completedPayload = append(completedPayload, `,"status":"completed","background":false,"error":null`...)
 	if modelName != "" {
-		completedPayload, errSet = sjson.SetBytes(completedPayload, "response.model", modelName)
-		if errSet != nil {
-			return nil, errSet
-		}
+		completedPayload = append(completedPayload, `,"model":`...)
+		completedPayload = strconv.AppendQuote(completedPayload, modelName)
 	}
+	completedPayload = append(completedPayload, `,"output":[],"usage":{"input_tokens":0,"output_tokens":0,"total_tokens":0}}}`...)
 
 	return [][]byte{createdPayload, completedPayload}, nil
 }
