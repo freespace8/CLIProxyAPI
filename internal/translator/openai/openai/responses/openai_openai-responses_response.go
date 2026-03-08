@@ -23,6 +23,7 @@ type oaiToResponsesState struct {
 	ResponseID     string
 	Created        int64
 	Started        bool
+	CompletedRequestFields string
 	ReasoningID    string
 	ReasoningIndex int
 	// aggregation buffers for response.output
@@ -101,6 +102,30 @@ func jsonArrayFromRawItems(items []string) string {
 	return builder.String()
 }
 
+func responseCreatedPayload(seq int, responseID string, createdAt int64) string {
+	buf := make([]byte, 0, len(responseID)+160)
+	buf = append(buf, `{"type":"response.created","sequence_number":`...)
+	buf = strconv.AppendInt(buf, int64(seq), 10)
+	buf = append(buf, `,"response":{"id":`...)
+	buf = strconv.AppendQuote(buf, responseID)
+	buf = append(buf, `,"object":"response","created_at":`...)
+	buf = strconv.AppendInt(buf, createdAt, 10)
+	buf = append(buf, `,"status":"in_progress","background":false,"error":null,"output":[]}}`...)
+	return string(buf)
+}
+
+func responseInProgressPayload(seq int, responseID string, createdAt int64) string {
+	buf := make([]byte, 0, len(responseID)+128)
+	buf = append(buf, `{"type":"response.in_progress","sequence_number":`...)
+	buf = strconv.AppendInt(buf, int64(seq), 10)
+	buf = append(buf, `,"response":{"id":`...)
+	buf = strconv.AppendQuote(buf, responseID)
+	buf = append(buf, `,"object":"response","created_at":`...)
+	buf = strconv.AppendInt(buf, createdAt, 10)
+	buf = append(buf, `,"status":"in_progress"}}`...)
+	return string(buf)
+}
+
 func outputTextDeltaPayload(seq int, itemID string, outputIndex int, delta string) string {
 	buf := make([]byte, 0, len(itemID)+len(delta)+128)
 	buf = append(buf, `{"type":"response.output_text.delta","sequence_number":`...)
@@ -126,6 +151,30 @@ func outputTextDonePayload(seq int, itemID string, outputIndex int, text string)
 	buf = append(buf, `,"content_index":0,"text":`...)
 	buf = strconv.AppendQuote(buf, text)
 	buf = append(buf, `,"logprobs":[]}`...)
+	return string(buf)
+}
+
+func messageOutputItemAddedPayload(seq int, itemID string, outputIndex int) string {
+	buf := make([]byte, 0, len(itemID)+152)
+	buf = append(buf, `{"type":"response.output_item.added","sequence_number":`...)
+	buf = strconv.AppendInt(buf, int64(seq), 10)
+	buf = append(buf, `,"output_index":`...)
+	buf = strconv.AppendInt(buf, int64(outputIndex), 10)
+	buf = append(buf, `,"item":{"id":`...)
+	buf = strconv.AppendQuote(buf, itemID)
+	buf = append(buf, `,"type":"message","status":"in_progress","content":[],"role":"assistant"}}`...)
+	return string(buf)
+}
+
+func contentPartAddedPayload(seq int, itemID string, outputIndex int) string {
+	buf := make([]byte, 0, len(itemID)+176)
+	buf = append(buf, `{"type":"response.content_part.added","sequence_number":`...)
+	buf = strconv.AppendInt(buf, int64(seq), 10)
+	buf = append(buf, `,"item_id":`...)
+	buf = strconv.AppendQuote(buf, itemID)
+	buf = append(buf, `,"output_index":`...)
+	buf = strconv.AppendInt(buf, int64(outputIndex), 10)
+	buf = append(buf, `,"content_index":0,"part":{"type":"output_text","annotations":[],"logprobs":[],"text":""}}`...)
 	return string(buf)
 }
 
@@ -253,6 +302,156 @@ func completedFunctionItemPayload(itemID string, arguments string, callID string
 	return string(buf)
 }
 
+func appendJSONStringField(buf []byte, field string, value string) []byte {
+	buf = append(buf, ',')
+	buf = strconv.AppendQuote(buf, field)
+	buf = append(buf, ':')
+	buf = strconv.AppendQuote(buf, value)
+	return buf
+}
+
+func appendJSONIntField(buf []byte, field string, value int64) []byte {
+	buf = append(buf, ',')
+	buf = strconv.AppendQuote(buf, field)
+	buf = append(buf, ':')
+	buf = strconv.AppendInt(buf, value, 10)
+	return buf
+}
+
+func appendJSONBoolField(buf []byte, field string, value bool) []byte {
+	buf = append(buf, ',')
+	buf = strconv.AppendQuote(buf, field)
+	buf = append(buf, ':')
+	buf = strconv.AppendBool(buf, value)
+	return buf
+}
+
+func appendJSONFloatField(buf []byte, field string, value float64) []byte {
+	buf = append(buf, ',')
+	buf = strconv.AppendQuote(buf, field)
+	buf = append(buf, ':')
+	buf = strconv.AppendFloat(buf, value, 'f', -1, 64)
+	return buf
+}
+
+func appendJSONRawField(buf []byte, field string, raw string) []byte {
+	buf = append(buf, ',')
+	buf = strconv.AppendQuote(buf, field)
+	buf = append(buf, ':')
+	buf = append(buf, raw...)
+	return buf
+}
+
+func buildCompletedRequestFields(requestRawJSON []byte) string {
+	if len(requestRawJSON) == 0 {
+		return ""
+	}
+
+	req := gjson.ParseBytes(requestRawJSON)
+	buf := make([]byte, 0, len(requestRawJSON))
+
+	if v := req.Get("instructions"); v.Exists() {
+		buf = appendJSONStringField(buf, "instructions", v.String())
+	}
+	if v := req.Get("max_output_tokens"); v.Exists() {
+		buf = appendJSONIntField(buf, "max_output_tokens", v.Int())
+	}
+	if v := req.Get("max_tool_calls"); v.Exists() {
+		buf = appendJSONIntField(buf, "max_tool_calls", v.Int())
+	}
+	if v := req.Get("model"); v.Exists() {
+		buf = appendJSONStringField(buf, "model", v.String())
+	}
+	if v := req.Get("parallel_tool_calls"); v.Exists() {
+		buf = appendJSONBoolField(buf, "parallel_tool_calls", v.Bool())
+	}
+	if v := req.Get("previous_response_id"); v.Exists() {
+		buf = appendJSONStringField(buf, "previous_response_id", v.String())
+	}
+	if v := req.Get("prompt_cache_key"); v.Exists() {
+		buf = appendJSONStringField(buf, "prompt_cache_key", v.String())
+	}
+	if v := req.Get("reasoning"); v.Exists() {
+		buf = appendJSONRawField(buf, "reasoning", v.Raw)
+	}
+	if v := req.Get("safety_identifier"); v.Exists() {
+		buf = appendJSONStringField(buf, "safety_identifier", v.String())
+	}
+	if v := req.Get("service_tier"); v.Exists() {
+		buf = appendJSONStringField(buf, "service_tier", v.String())
+	}
+	if v := req.Get("store"); v.Exists() {
+		buf = appendJSONBoolField(buf, "store", v.Bool())
+	}
+	if v := req.Get("temperature"); v.Exists() {
+		buf = appendJSONFloatField(buf, "temperature", v.Float())
+	}
+	if v := req.Get("text"); v.Exists() {
+		buf = appendJSONRawField(buf, "text", v.Raw)
+	}
+	if v := req.Get("tool_choice"); v.Exists() {
+		buf = appendJSONRawField(buf, "tool_choice", v.Raw)
+	}
+	if v := req.Get("tools"); v.Exists() {
+		buf = appendJSONRawField(buf, "tools", v.Raw)
+	}
+	if v := req.Get("top_logprobs"); v.Exists() {
+		buf = appendJSONIntField(buf, "top_logprobs", v.Int())
+	}
+	if v := req.Get("top_p"); v.Exists() {
+		buf = appendJSONFloatField(buf, "top_p", v.Float())
+	}
+	if v := req.Get("truncation"); v.Exists() {
+		buf = appendJSONStringField(buf, "truncation", v.String())
+	}
+	if v := req.Get("user"); v.Exists() {
+		buf = appendJSONRawField(buf, "user", v.Raw)
+	}
+	if v := req.Get("metadata"); v.Exists() {
+		buf = appendJSONRawField(buf, "metadata", v.Raw)
+	}
+
+	return string(buf)
+}
+
+func completedPayload(seq int, responseID string, created int64, requestFields string, outputArray string, promptTokens int64, cachedTokens int64, completionTokens int64, totalTokens int64, reasoningTokens int64, usageSeen bool) string {
+	buf := make([]byte, 0, len(responseID)+len(requestFields)+len(outputArray)+384)
+	buf = append(buf, `{"type":"response.completed","sequence_number":`...)
+	buf = strconv.AppendInt(buf, int64(seq), 10)
+	buf = append(buf, `,"response":{"id":`...)
+	buf = strconv.AppendQuote(buf, responseID)
+	buf = append(buf, `,"object":"response","created_at":`...)
+	buf = strconv.AppendInt(buf, created, 10)
+	buf = append(buf, `,"status":"completed","background":false,"error":null`...)
+	buf = append(buf, requestFields...)
+	if outputArray != "" {
+		buf = append(buf, `,"output":`...)
+		buf = append(buf, outputArray...)
+	}
+	if usageSeen {
+		total := totalTokens
+		if total == 0 {
+			total = promptTokens + completionTokens
+		}
+		buf = append(buf, `,"usage":{"input_tokens":`...)
+		buf = strconv.AppendInt(buf, promptTokens, 10)
+		buf = append(buf, `,"input_tokens_details":{"cached_tokens":`...)
+		buf = strconv.AppendInt(buf, cachedTokens, 10)
+		buf = append(buf, `},"output_tokens":`...)
+		buf = strconv.AppendInt(buf, completionTokens, 10)
+		if reasoningTokens > 0 {
+			buf = append(buf, `,"output_tokens_details":{"reasoning_tokens":`...)
+			buf = strconv.AppendInt(buf, reasoningTokens, 10)
+			buf = append(buf, '}')
+		}
+		buf = append(buf, `,"total_tokens":`...)
+		buf = strconv.AppendInt(buf, total, 10)
+		buf = append(buf, '}')
+	}
+	buf = append(buf, `}}`...)
+	return string(buf)
+}
+
 func appendMessageDoneEvents(out []string, responseID string, outputIndex int, text string, nextSeq func() int) []string {
 	itemID := messageItemID(responseID, outputIndex)
 	out = append(out, emitRespEvent("response.output_text.done", outputTextDonePayload(nextSeq(), itemID, outputIndex, text)))
@@ -362,18 +561,8 @@ func ConvertOpenAIChatCompletionsResponseToOpenAIResponses(ctx context.Context, 
 		st.TotalTokens = 0
 		st.ReasoningTokens = 0
 		st.UsageSeen = false
-		// response.created
-		created := `{"type":"response.created","sequence_number":0,"response":{"id":"","object":"response","created_at":0,"status":"in_progress","background":false,"error":null,"output":[]}}`
-		created, _ = sjson.Set(created, "sequence_number", nextSeq())
-		created, _ = sjson.Set(created, "response.id", st.ResponseID)
-		created, _ = sjson.Set(created, "response.created_at", st.Created)
-		out = append(out, emitRespEvent("response.created", created))
-
-		inprog := `{"type":"response.in_progress","sequence_number":0,"response":{"id":"","object":"response","created_at":0,"status":"in_progress"}}`
-		inprog, _ = sjson.Set(inprog, "sequence_number", nextSeq())
-		inprog, _ = sjson.Set(inprog, "response.id", st.ResponseID)
-		inprog, _ = sjson.Set(inprog, "response.created_at", st.Created)
-		out = append(out, emitRespEvent("response.in_progress", inprog))
+		out = append(out, emitRespEvent("response.created", responseCreatedPayload(nextSeq(), st.ResponseID, st.Created)))
+		out = append(out, emitRespEvent("response.in_progress", responseInProgressPayload(nextSeq(), st.ResponseID, st.Created)))
 		st.Started = true
 	}
 
@@ -417,20 +606,11 @@ func ConvertOpenAIChatCompletionsResponseToOpenAIResponses(ctx context.Context, 
 					}
 					itemID := messageItemID(st.ResponseID, idx)
 					if !st.MsgItemAdded[idx] {
-						item := `{"type":"response.output_item.added","sequence_number":0,"output_index":0,"item":{"id":"","type":"message","status":"in_progress","content":[],"role":"assistant"}}`
-						item, _ = sjson.Set(item, "sequence_number", nextSeq())
-						item, _ = sjson.Set(item, "output_index", idx)
-						item, _ = sjson.Set(item, "item.id", itemID)
-						out = append(out, emitRespEvent("response.output_item.added", item))
+						out = append(out, emitRespEvent("response.output_item.added", messageOutputItemAddedPayload(nextSeq(), itemID, idx)))
 						st.MsgItemAdded[idx] = true
 					}
 					if !st.MsgContentAdded[idx] {
-						part := `{"type":"response.content_part.added","sequence_number":0,"item_id":"","output_index":0,"content_index":0,"part":{"type":"output_text","annotations":[],"logprobs":[],"text":""}}`
-						part, _ = sjson.Set(part, "sequence_number", nextSeq())
-						part, _ = sjson.Set(part, "item_id", itemID)
-						part, _ = sjson.Set(part, "output_index", idx)
-						part, _ = sjson.Set(part, "content_index", 0)
-						out = append(out, emitRespEvent("response.content_part.added", part))
+						out = append(out, emitRespEvent("response.content_part.added", contentPartAddedPayload(nextSeq(), itemID, idx)))
 						st.MsgContentAdded[idx] = true
 					}
 

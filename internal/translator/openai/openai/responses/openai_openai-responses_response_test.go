@@ -68,6 +68,38 @@ func TestConvertOpenAIChatCompletionsResponseToOpenAIResponsesEmitsCompletedUsag
 	}
 }
 
+func TestConvertOpenAIChatCompletionsResponseToOpenAIResponsesEmitsStartEvents(t *testing.T) {
+	chunk := []byte(`data: {"id":"chatcmpl-start","created":11,"object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"hi"}}]}`)
+
+	var param any
+	out := ConvertOpenAIChatCompletionsResponseToOpenAIResponses(context.Background(), "gpt-5.4", nil, nil, chunk, &param)
+	if len(out) < 2 {
+		t.Fatalf("event count = %d, want at least 2", len(out))
+	}
+
+	event, created := parseOpenAIResponsesSSEChunk(t, out[0])
+	if event != "response.created" {
+		t.Fatalf("first event = %q, want %q", event, "response.created")
+	}
+	if got := created.Get("response.id").String(); got != "chatcmpl-start" {
+		t.Fatalf("response.id = %q, want %q", got, "chatcmpl-start")
+	}
+	if got := created.Get("response.created_at").Int(); got != 11 {
+		t.Fatalf("response.created_at = %d, want %d", got, 11)
+	}
+
+	event, inProgress := parseOpenAIResponsesSSEChunk(t, out[1])
+	if event != "response.in_progress" {
+		t.Fatalf("second event = %q, want %q", event, "response.in_progress")
+	}
+	if got := inProgress.Get("response.id").String(); got != "chatcmpl-start" {
+		t.Fatalf("response.id = %q, want %q", got, "chatcmpl-start")
+	}
+	if got := inProgress.Get("response.created_at").Int(); got != 11 {
+		t.Fatalf("response.created_at = %d, want %d", got, 11)
+	}
+}
+
 func TestConvertOpenAIChatCompletionsResponseToOpenAIResponsesEscapesStreamingText(t *testing.T) {
 	chunks := [][]byte{
 		[]byte("data: {\"id\":\"chatcmpl-escape\",\"created\":2,\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"第一行\\n\\\"quoted\\\"\"}}]}"),
