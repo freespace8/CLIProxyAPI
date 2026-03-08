@@ -157,11 +157,80 @@ func messageOutputItemDonePayload(seq int, itemID string, outputIndex int, text 
 	return string(buf)
 }
 
+func functionOutputItemAddedPayload(seq int, itemID string, outputIndex int, callID string, name string) string {
+	buf := make([]byte, 0, len(itemID)+len(callID)+len(name)+192)
+	buf = append(buf, `{"type":"response.output_item.added","sequence_number":`...)
+	buf = strconv.AppendInt(buf, int64(seq), 10)
+	buf = append(buf, `,"output_index":`...)
+	buf = strconv.AppendInt(buf, int64(outputIndex), 10)
+	buf = append(buf, `,"item":{"id":`...)
+	buf = strconv.AppendQuote(buf, itemID)
+	buf = append(buf, `,"type":"function_call","status":"in_progress","arguments":"","call_id":`...)
+	buf = strconv.AppendQuote(buf, callID)
+	buf = append(buf, `,"name":`...)
+	buf = strconv.AppendQuote(buf, name)
+	buf = append(buf, `}}`...)
+	return string(buf)
+}
+
+func functionCallArgumentsDeltaPayload(seq int, itemID string, outputIndex int, delta string) string {
+	buf := make([]byte, 0, len(itemID)+len(delta)+144)
+	buf = append(buf, `{"type":"response.function_call_arguments.delta","sequence_number":`...)
+	buf = strconv.AppendInt(buf, int64(seq), 10)
+	buf = append(buf, `,"item_id":`...)
+	buf = strconv.AppendQuote(buf, itemID)
+	buf = append(buf, `,"output_index":`...)
+	buf = strconv.AppendInt(buf, int64(outputIndex), 10)
+	buf = append(buf, `,"delta":`...)
+	buf = strconv.AppendQuote(buf, delta)
+	buf = append(buf, `}`...)
+	return string(buf)
+}
+
+func functionCallArgumentsDonePayload(seq int, itemID string, outputIndex int, arguments string) string {
+	buf := make([]byte, 0, len(itemID)+len(arguments)+152)
+	buf = append(buf, `{"type":"response.function_call_arguments.done","sequence_number":`...)
+	buf = strconv.AppendInt(buf, int64(seq), 10)
+	buf = append(buf, `,"item_id":`...)
+	buf = strconv.AppendQuote(buf, itemID)
+	buf = append(buf, `,"output_index":`...)
+	buf = strconv.AppendInt(buf, int64(outputIndex), 10)
+	buf = append(buf, `,"arguments":`...)
+	buf = strconv.AppendQuote(buf, arguments)
+	buf = append(buf, `}`...)
+	return string(buf)
+}
+
+func functionOutputItemDonePayload(seq int, itemID string, outputIndex int, arguments string, callID string, name string) string {
+	buf := make([]byte, 0, len(itemID)+len(arguments)+len(callID)+len(name)+208)
+	buf = append(buf, `{"type":"response.output_item.done","sequence_number":`...)
+	buf = strconv.AppendInt(buf, int64(seq), 10)
+	buf = append(buf, `,"output_index":`...)
+	buf = strconv.AppendInt(buf, int64(outputIndex), 10)
+	buf = append(buf, `,"item":{"id":`...)
+	buf = strconv.AppendQuote(buf, itemID)
+	buf = append(buf, `,"type":"function_call","status":"completed","arguments":`...)
+	buf = strconv.AppendQuote(buf, arguments)
+	buf = append(buf, `,"call_id":`...)
+	buf = strconv.AppendQuote(buf, callID)
+	buf = append(buf, `,"name":`...)
+	buf = strconv.AppendQuote(buf, name)
+	buf = append(buf, `}}`...)
+	return string(buf)
+}
+
 func appendMessageDoneEvents(out []string, responseID string, outputIndex int, text string, nextSeq func() int) []string {
 	itemID := messageItemID(responseID, outputIndex)
 	out = append(out, emitRespEvent("response.output_text.done", outputTextDonePayload(nextSeq(), itemID, outputIndex, text)))
 	out = append(out, emitRespEvent("response.content_part.done", contentPartDonePayload(nextSeq(), itemID, outputIndex, text)))
 	out = append(out, emitRespEvent("response.output_item.done", messageOutputItemDonePayload(nextSeq(), itemID, outputIndex, text)))
+	return out
+}
+
+func appendFunctionDoneEvents(out []string, callID string, outputIndex int, arguments string, name string, nextSeq func() int) []string {
+	itemID := functionItemID(callID)
+	out = append(out, emitRespEvent("response.function_call_arguments.done", functionCallArgumentsDonePayload(nextSeq(), itemID, outputIndex, arguments)))
+	out = append(out, emitRespEvent("response.output_item.done", functionOutputItemDonePayload(nextSeq(), itemID, outputIndex, arguments, callID, name)))
 	return out
 }
 
@@ -400,14 +469,8 @@ func ConvertOpenAIChatCompletionsResponseToOpenAIResponses(ctx context.Context, 
 					}
 
 					if shouldEmitItem && effectiveCallID != "" {
-						o := `{"type":"response.output_item.added","sequence_number":0,"output_index":0,"item":{"id":"","type":"function_call","status":"in_progress","arguments":"","call_id":"","name":""}}`
-						o, _ = sjson.Set(o, "sequence_number", nextSeq())
-						o, _ = sjson.Set(o, "output_index", idx)
-						o, _ = sjson.Set(o, "item.id", functionItemID(effectiveCallID))
-						o, _ = sjson.Set(o, "item.call_id", effectiveCallID)
 						name := st.FuncNames[idx]
-						o, _ = sjson.Set(o, "item.name", name)
-						out = append(out, emitRespEvent("response.output_item.added", o))
+						out = append(out, emitRespEvent("response.output_item.added", functionOutputItemAddedPayload(nextSeq(), functionItemID(effectiveCallID), idx, effectiveCallID, name)))
 					}
 
 					// Ensure args buffer exists for this index
@@ -417,20 +480,16 @@ func ConvertOpenAIChatCompletionsResponseToOpenAIResponses(ctx context.Context, 
 
 					// Append arguments delta if available and we have a valid call_id to reference
 					if args := tcs.Get("0.function.arguments"); args.Exists() && args.String() != "" {
+						argsText := args.String()
 						// Prefer an already known call_id; fall back to newCallID if first time
 						refCallID := st.FuncCallIDs[idx]
 						if refCallID == "" {
 							refCallID = newCallID
 						}
 						if refCallID != "" {
-							ad := `{"type":"response.function_call_arguments.delta","sequence_number":0,"item_id":"","output_index":0,"delta":""}`
-							ad, _ = sjson.Set(ad, "sequence_number", nextSeq())
-							ad, _ = sjson.Set(ad, "item_id", functionItemID(refCallID))
-							ad, _ = sjson.Set(ad, "output_index", idx)
-							ad, _ = sjson.Set(ad, "delta", args.String())
-							out = append(out, emitRespEvent("response.function_call_arguments.delta", ad))
+							out = append(out, emitRespEvent("response.function_call_arguments.delta", functionCallArgumentsDeltaPayload(nextSeq(), functionItemID(refCallID), idx, argsText)))
 						}
-						st.FuncArgsBuf[idx].WriteString(args.String())
+						st.FuncArgsBuf[idx].WriteString(argsText)
 					}
 				}
 			}
@@ -471,21 +530,7 @@ func ConvertOpenAIChatCompletionsResponseToOpenAIResponses(ctx context.Context, 
 						if b := st.FuncArgsBuf[i]; b != nil && b.Len() > 0 {
 							args = b.String()
 						}
-						fcDone := `{"type":"response.function_call_arguments.done","sequence_number":0,"item_id":"","output_index":0,"arguments":""}`
-						fcDone, _ = sjson.Set(fcDone, "sequence_number", nextSeq())
-						fcDone, _ = sjson.Set(fcDone, "item_id", functionItemID(callID))
-						fcDone, _ = sjson.Set(fcDone, "output_index", i)
-						fcDone, _ = sjson.Set(fcDone, "arguments", args)
-						out = append(out, emitRespEvent("response.function_call_arguments.done", fcDone))
-
-						itemDone := `{"type":"response.output_item.done","sequence_number":0,"output_index":0,"item":{"id":"","type":"function_call","status":"completed","arguments":"","call_id":"","name":""}}`
-						itemDone, _ = sjson.Set(itemDone, "sequence_number", nextSeq())
-						itemDone, _ = sjson.Set(itemDone, "output_index", i)
-						itemDone, _ = sjson.Set(itemDone, "item.id", functionItemID(callID))
-						itemDone, _ = sjson.Set(itemDone, "item.arguments", args)
-						itemDone, _ = sjson.Set(itemDone, "item.call_id", callID)
-						itemDone, _ = sjson.Set(itemDone, "item.name", st.FuncNames[i])
-						out = append(out, emitRespEvent("response.output_item.done", itemDone))
+						out = appendFunctionDoneEvents(out, callID, i, args, st.FuncNames[i], nextSeq)
 						st.FuncItemDone[i] = true
 						st.FuncArgsDone[i] = true
 					}

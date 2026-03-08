@@ -103,6 +103,44 @@ func TestConvertOpenAIChatCompletionsResponseToOpenAIResponsesEscapesStreamingTe
 	}
 }
 
+func TestConvertOpenAIChatCompletionsResponseToOpenAIResponsesEscapesFunctionArguments(t *testing.T) {
+	chunks := [][]byte{
+		[]byte("data: {\"id\":\"chatcmpl-tool\",\"created\":3,\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"id\":\"call-1\",\"function\":{\"name\":\"lookup\",\"arguments\":\"{\\\"q\\\":\\\"line1\\\\n\\\\\\\"quoted\\\\\\\"\\\"}\"}}]}}]}"),
+		[]byte(`data: {"id":"chatcmpl-tool","created":3,"object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}`),
+	}
+
+	var param any
+	var out []string
+	for _, chunk := range chunks {
+		out = append(out, ConvertOpenAIChatCompletionsResponseToOpenAIResponses(context.Background(), "gpt-5.4", nil, nil, chunk, &param)...)
+	}
+
+	var deltaSeen bool
+	var doneSeen bool
+	for _, chunk := range out {
+		event, data := parseOpenAIResponsesSSEChunk(t, chunk)
+		switch event {
+		case "response.function_call_arguments.delta":
+			deltaSeen = true
+			if got := data.Get("delta").String(); got != "{\"q\":\"line1\\n\\\"quoted\\\"\"}" {
+				t.Fatalf("delta = %q, want %q", got, "{\"q\":\"line1\\n\\\"quoted\\\"\"}")
+			}
+		case "response.function_call_arguments.done":
+			doneSeen = true
+			if got := data.Get("arguments").String(); got != "{\"q\":\"line1\\n\\\"quoted\\\"\"}" {
+				t.Fatalf("arguments = %q, want %q", got, "{\"q\":\"line1\\n\\\"quoted\\\"\"}")
+			}
+		}
+	}
+
+	if !deltaSeen {
+		t.Fatal("missing response.function_call_arguments.delta event")
+	}
+	if !doneSeen {
+		t.Fatal("missing response.function_call_arguments.done event")
+	}
+}
+
 func BenchmarkConvertOpenAIChatCompletionsResponseToOpenAIResponses(b *testing.B) {
 	chunks := [][]byte{
 		[]byte(`data: {"id":"chatcmpl-1","created":1,"object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"第一段"}}]}`),
