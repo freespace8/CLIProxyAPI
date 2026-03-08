@@ -26,8 +26,8 @@ function formatTokensPerSecond(totalTokens: number, durationMs: number): string 
   if (!Number.isFinite(durationMs) || durationMs <= 0) return '--'
   const tokensPerSecond = totalTokens / (durationMs / 1000)
   if (!Number.isFinite(tokensPerSecond) || tokensPerSecond <= 0) return '--'
-  if (tokensPerSecond >= 1000) return `${(tokensPerSecond / 1000).toFixed(1)}Kt/s`
-  return `${Math.round(tokensPerSecond)}t/s`
+  if (tokensPerSecond >= 1000) return `${(tokensPerSecond / 1000).toFixed(1)}Ktok/s`
+  return `${Math.round(tokensPerSecond)}tok/s`
 }
 
 function formatPerformance(detail: RequestLogRecord): string {
