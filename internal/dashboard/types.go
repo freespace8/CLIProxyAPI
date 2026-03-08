@@ -12,6 +12,7 @@ type LiveRequest struct {
 	RequestID     string    `json:"requestId"`
 	Model         string    `json:"model"`
 	ThinkingLevel string    `json:"thinkingLevel,omitempty"`
+	ServiceTier   string    `json:"serviceTier,omitempty"`
 	StartTime     time.Time `json:"startTime"`
 }
 
@@ -26,6 +27,7 @@ type RequestLogRecord struct {
 	Success          bool      `json:"success"`
 	Model            string    `json:"model"`
 	ThinkingLevel    string    `json:"thinkingLevel,omitempty"`
+	ServiceTier      string    `json:"serviceTier,omitempty"`
 	ErrorMessage     string    `json:"errorMessage,omitempty"`
 	ResponseBody     string    `json:"responseBody,omitempty"`
 }
@@ -34,6 +36,7 @@ type StartRecord struct {
 	RequestID     string
 	Model         string
 	ThinkingLevel string
+	ServiceTier   string
 	StartedAt     time.Time
 }
 
@@ -41,12 +44,14 @@ type UpdateRecord struct {
 	RequestID     string
 	Model         string
 	ThinkingLevel string
+	ServiceTier   string
 }
 
 type CompleteRecord struct {
 	RequestID     string
 	Model         string
 	ThinkingLevel string
+	ServiceTier   string
 	StatusCode    int
 	ResponseBody  string
 	ErrorMessage  string

@@ -12,6 +12,7 @@ import (
 type requestSnapshot struct {
 	model         string
 	thinkingLevel string
+	serviceTier   string
 	started       time.Time
 }
 
@@ -56,11 +57,13 @@ func (m *RequestMonitor) Start(record StartRecord) {
 		RequestID:     record.RequestID,
 		Model:         fallbackModel(record.Model),
 		ThinkingLevel: normalizeThinkingLevel(record.ThinkingLevel),
+		ServiceTier:   strings.TrimSpace(record.ServiceTier),
 		StartTime:     startedAt,
 	}
 	m.live[record.RequestID] = requestSnapshot{
 		model:         liveRequest.Model,
 		thinkingLevel: liveRequest.ThinkingLevel,
+		serviceTier:   liveRequest.ServiceTier,
 		started:       liveRequest.StartTime,
 	}
 	m.publishLocked(MonitorStreamEvent{
@@ -87,6 +90,9 @@ func (m *RequestMonitor) Update(record UpdateRecord) {
 	if thinkingLevel := normalizeThinkingLevel(record.ThinkingLevel); thinkingLevel != "" {
 		snapshot.thinkingLevel = thinkingLevel
 	}
+	if serviceTier := strings.TrimSpace(record.ServiceTier); serviceTier != "" {
+		snapshot.serviceTier = serviceTier
+	}
 	m.live[record.RequestID] = snapshot
 
 	m.publishLocked(MonitorStreamEvent{
@@ -95,6 +101,7 @@ func (m *RequestMonitor) Update(record UpdateRecord) {
 			RequestID:     record.RequestID,
 			Model:         fallbackModel(snapshot.model),
 			ThinkingLevel: snapshot.thinkingLevel,
+			ServiceTier:   snapshot.serviceTier,
 			StartTime:     snapshot.started,
 		}),
 	})
@@ -136,6 +143,10 @@ func (m *RequestMonitor) Complete(record CompleteRecord) {
 	if trimmed := normalizeThinkingLevel(record.ThinkingLevel); trimmed != "" {
 		thinkingLevel = trimmed
 	}
+	serviceTier := snapshot.serviceTier
+	if trimmed := strings.TrimSpace(record.ServiceTier); trimmed != "" {
+		serviceTier = trimmed
+	}
 
 	m.nextID++
 	logRecord := RequestLogRecord{
@@ -149,6 +160,7 @@ func (m *RequestMonitor) Complete(record CompleteRecord) {
 		Success:          record.StatusCode > 0 && record.StatusCode < 400,
 		Model:            fallbackModel(model),
 		ThinkingLevel:    thinkingLevel,
+		ServiceTier:      serviceTier,
 		ErrorMessage:     strings.TrimSpace(record.ErrorMessage),
 		ResponseBody:     strings.TrimSpace(record.ResponseBody),
 	}
@@ -180,6 +192,7 @@ func (m *RequestMonitor) LiveRequests() []LiveRequest {
 			RequestID:     requestID,
 			Model:         fallbackModel(record.model),
 			ThinkingLevel: record.thinkingLevel,
+			ServiceTier:   record.serviceTier,
 			StartTime:     record.started,
 		})
 	}

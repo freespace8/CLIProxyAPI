@@ -85,6 +85,7 @@ func (h *OpenAIResponsesAPIHandler) Responses(c *gin.Context) {
 	if modelName := gjson.GetBytes(rawJSON, "model").String(); modelName != "" {
 		dashboard.SetRequestModel(c, modelName)
 		dashboard.SetRequestThinkingLevel(c, dashboard.ResolveRequestThinkingLevel(rawJSON, modelName))
+		dashboard.SetRequestServiceTier(c, dashboard.ResolveRequestServiceTier(rawJSON))
 		dashboard.PublishRequestLiveInfo(c)
 	}
 
@@ -112,6 +113,7 @@ func (h *OpenAIResponsesAPIHandler) Compact(c *gin.Context) {
 	if modelName := gjson.GetBytes(rawJSON, "model").String(); modelName != "" {
 		dashboard.SetRequestModel(c, modelName)
 		dashboard.SetRequestThinkingLevel(c, dashboard.ResolveRequestThinkingLevel(rawJSON, modelName))
+		dashboard.SetRequestServiceTier(c, dashboard.ResolveRequestServiceTier(rawJSON))
 		dashboard.PublishRequestLiveInfo(c)
 	}
 

@@ -106,6 +106,7 @@ func DashboardRequestMonitorMiddleware(store *dashboard.RequestMonitor) gin.Hand
 			RequestID:     requestID,
 			Model:         dashboard.RequestModel(c),
 			ThinkingLevel: dashboard.RequestThinkingLevel(c),
+			ServiceTier:   dashboard.RequestServiceTier(c),
 			StartedAt:     startedAt,
 		})
 		c.Next()
@@ -121,6 +122,7 @@ func DashboardRequestMonitorMiddleware(store *dashboard.RequestMonitor) gin.Hand
 			RequestID:     requestID,
 			Model:         dashboard.RequestModel(c),
 			ThinkingLevel: dashboard.RequestThinkingLevel(c),
+			ServiceTier:   dashboard.RequestServiceTier(c),
 			StatusCode:    statusCode,
 			ResponseBody:  writer.capturedResponseBody(),
 			ErrorMessage:  resolveDashboardError(statusCode, writer.body.Bytes(), contextErrors(c)),

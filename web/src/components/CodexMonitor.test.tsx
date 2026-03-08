@@ -56,6 +56,7 @@ describe('CodexMonitor responsive layout', () => {
           requestId: 'req-1',
           model: 'gpt-5-codex',
           thinkingLevel: 'high',
+          serviceTier: 'priority',
           startTime: '2026-03-07T14:00:00.000Z',
         }],
         logs: [],
@@ -64,7 +65,7 @@ describe('CodexMonitor responsive layout', () => {
 
     render(<CodexMonitor accessKey="secret" />)
 
-    expect(await screen.findByText('gpt-5-codex high')).toBeInTheDocument()
+    expect(await screen.findByText('gpt-5-codex high fast')).toBeInTheDocument()
     expect(screen.queryByText('开始时间')).not.toBeInTheDocument()
     expect(screen.queryByText('已运行')).not.toBeInTheDocument()
     expect(screen.queryByText('请求正在处理中，已切换为移动端友好的摘要布局。')).not.toBeInTheDocument()
@@ -86,6 +87,7 @@ describe('CodexMonitor responsive layout', () => {
           success: false,
           model: 'gpt-5-codex',
           thinkingLevel: 'medium',
+          serviceTier: 'priority',
           errorMessage: 'upstream timeout',
           responseBody: '{"error":"timeout"}',
         }],
@@ -94,7 +96,7 @@ describe('CodexMonitor responsive layout', () => {
 
     render(<CodexMonitor accessKey="secret" />)
 
-    expect((await screen.findAllByText('gpt-5-codex medium')).length).toBeGreaterThan(0)
+    expect((await screen.findAllByText('gpt-5-codex medium fast')).length).toBeGreaterThan(0)
 
     await waitFor(() => {
       expect(screen.getByText('总 Token')).toBeInTheDocument()

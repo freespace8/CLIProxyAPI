@@ -2,6 +2,7 @@ export interface LiveRequest {
   requestId: string
   model: string
   thinkingLevel?: string
+  serviceTier?: string
   startTime: string
 }
 
@@ -16,6 +17,7 @@ export interface RequestLogRecord {
   success: boolean
   model: string
   thinkingLevel?: string
+  serviceTier?: string
   errorMessage?: string
   responseBody?: string
 }

@@ -12,6 +12,7 @@ import (
 const (
 	requestModelContextKey         = "DASHBOARD_REQUEST_MODEL"
 	requestThinkingLevelContextKey = "DASHBOARD_REQUEST_THINKING_LEVEL"
+	requestServiceTierContextKey   = "DASHBOARD_REQUEST_SERVICE_TIER"
 	requestMonitorContextKey       = "DASHBOARD_REQUEST_MONITOR"
 	usageDetailContextKey          = "DASHBOARD_USAGE_DETAIL"
 )
@@ -62,6 +63,29 @@ func RequestThinkingLevel(c *gin.Context) string {
 	return normalizeThinkingLevel(level)
 }
 
+func SetRequestServiceTier(c *gin.Context, tier string) {
+	if c == nil {
+		return
+	}
+	tier = strings.TrimSpace(tier)
+	if tier == "" {
+		return
+	}
+	c.Set(requestServiceTierContextKey, tier)
+}
+
+func RequestServiceTier(c *gin.Context) string {
+	if c == nil {
+		return ""
+	}
+	raw, exists := c.Get(requestServiceTierContextKey)
+	if !exists {
+		return ""
+	}
+	tier, _ := raw.(string)
+	return strings.TrimSpace(tier)
+}
+
 func BindRequestMonitor(c *gin.Context, monitor *RequestMonitor) {
 	if c == nil || monitor == nil {
 		return
@@ -90,6 +114,7 @@ func PublishRequestLiveInfo(c *gin.Context) {
 		RequestID:     requestID,
 		Model:         RequestModel(c),
 		ThinkingLevel: RequestThinkingLevel(c),
+		ServiceTier:   RequestServiceTier(c),
 	})
 }
 
@@ -107,6 +132,10 @@ func ResolveRequestThinkingLevel(rawJSON []byte, model string) string {
 		}
 	}
 	return ""
+}
+
+func ResolveRequestServiceTier(rawJSON []byte) string {
+	return strings.TrimSpace(gjson.GetBytes(rawJSON, "service_tier").String())
 }
 
 func SetUsageDetail(c *gin.Context, detail coreusage.Detail) {

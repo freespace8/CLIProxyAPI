@@ -47,11 +47,14 @@ function formatElapsed(startTime: string, now: number): string {
   return `${minutes}:${String(seconds).padStart(2, '0')}.${tenths}`
 }
 
-function formatModelWithThinking(model: string, thinkingLevel?: string): string {
+function formatModelWithThinking(model: string, thinkingLevel?: string, serviceTier?: string): string {
   const normalizedModel = model.trim() || '--'
   const normalizedThinkingLevel = thinkingLevel?.trim()
-  if (!normalizedThinkingLevel) return normalizedModel
-  return `${normalizedModel} ${normalizedThinkingLevel}`
+  const normalizedServiceTier = serviceTier?.trim().toLowerCase() === 'priority' ? 'fast' : ''
+  const parts = [normalizedModel]
+  if (normalizedThinkingLevel) parts.push(normalizedThinkingLevel)
+  if (normalizedServiceTier) parts.push(normalizedServiceTier)
+  return parts.join(' ')
 }
 
 function formatTokenCount(value: number): string {
@@ -291,7 +294,7 @@ function DashboardHeader(props: {
 }
 
 function LiveRequestItem(props: { now: number; request: LiveRequest }) {
-  const modelLabel = formatModelWithThinking(props.request.model, props.request.thinkingLevel)
+  const modelLabel = formatModelWithThinking(props.request.model, props.request.thinkingLevel, props.request.serviceTier)
 
   return (
     <article className="grid min-h-[60px] w-full grid-cols-[minmax(0,1fr)_78px] items-center gap-2 rounded-lg border px-3 py-2.5 sm:w-[240px]">
@@ -330,7 +333,7 @@ function MobileLogCard(props: {
   log: RequestLogRecord
   onOpenError: (log: RequestLogRecord) => void
 }) {
-  const modelLabel = formatModelWithThinking(props.log.model, props.log.thinkingLevel)
+  const modelLabel = formatModelWithThinking(props.log.model, props.log.thinkingLevel, props.log.serviceTier)
   const statusLabel = formatStatusLabel(props.log)
 
   return (
@@ -394,7 +397,7 @@ function LogsTable(props: {
         </div>
         {props.logs.length === 0 ? <p className="px-2 py-8 text-sm text-muted-foreground">最近还没有 Codex 请求日志。</p> : null}
         {props.logs.map((log) => {
-          const modelLabel = formatModelWithThinking(log.model, log.thinkingLevel)
+          const modelLabel = formatModelWithThinking(log.model, log.thinkingLevel, log.serviceTier)
 
           return (
             <div className={`${desktopGridClassName} border-b px-2 py-4 last:border-b-0`} key={log.id}>

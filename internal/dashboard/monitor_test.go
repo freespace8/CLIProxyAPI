@@ -15,6 +15,7 @@ func TestRequestMonitorStoresLightweightLogs(t *testing.T) {
 		RequestID:     "req-1",
 		Model:         "gpt-5.3-codex",
 		ThinkingLevel: "low",
+		ServiceTier:   "priority",
 		StartedAt:     startedAt,
 	})
 	monitor.Complete(CompleteRecord{
@@ -39,6 +40,9 @@ func TestRequestMonitorStoresLightweightLogs(t *testing.T) {
 	}
 	if logs[0].ThinkingLevel != "low" {
 		t.Fatalf("thinking level = %q, want low", logs[0].ThinkingLevel)
+	}
+	if logs[0].ServiceTier != "priority" {
+		t.Fatalf("service tier = %q, want priority", logs[0].ServiceTier)
 	}
 	if logs[0].TotalTokens != 19 {
 		t.Fatalf("total tokens = %d, want 19", logs[0].TotalTokens)
@@ -88,6 +92,7 @@ func TestRequestMonitorPublishesSnapshotAndAppend(t *testing.T) {
 		RequestID:     "req-2",
 		Model:         "gpt-5.3-codex",
 		ThinkingLevel: "high",
+		ServiceTier:   "priority",
 	})
 
 	select {
@@ -103,6 +108,9 @@ func TestRequestMonitorPublishesSnapshotAndAppend(t *testing.T) {
 		}
 		if event.Request.ThinkingLevel != "high" {
 			t.Fatalf("thinking level = %q, want %q", event.Request.ThinkingLevel, "high")
+		}
+		if event.Request.ServiceTier != "priority" {
+			t.Fatalf("service tier = %q, want %q", event.Request.ServiceTier, "priority")
 		}
 		if !event.Request.StartTime.Equal(startedAt) {
 			t.Fatalf("start time changed after update")
@@ -132,6 +140,9 @@ func TestRequestMonitorPublishesSnapshotAndAppend(t *testing.T) {
 		}
 		if event.Log.ThinkingLevel != "high" {
 			t.Fatalf("thinking level = %q, want high", event.Log.ThinkingLevel)
+		}
+		if event.Log.ServiceTier != "priority" {
+			t.Fatalf("service tier = %q, want priority", event.Log.ServiceTier)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("expected append event")

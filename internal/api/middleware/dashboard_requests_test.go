@@ -20,6 +20,7 @@ func TestDashboardRequestMonitorMiddlewareTracksResponsesRequests(t *testing.T) 
 	router.POST("/v1/responses", func(c *gin.Context) {
 		dashboard.SetRequestModel(c, "gpt-5.3-codex")
 		dashboard.SetRequestThinkingLevel(c, "medium")
+		dashboard.SetRequestServiceTier(c, dashboard.ResolveRequestServiceTier([]byte(`{"service_tier":"priority"}`)))
 		dashboard.SetUsageDetail(c, coreusage.Detail{
 			TotalTokens:      67,
 			CachedTokens:     23,
@@ -45,6 +46,9 @@ func TestDashboardRequestMonitorMiddlewareTracksResponsesRequests(t *testing.T) 
 	}
 	if logs[0].ThinkingLevel != "medium" {
 		t.Fatalf("thinking level = %q, want medium", logs[0].ThinkingLevel)
+	}
+	if logs[0].ServiceTier != "priority" {
+		t.Fatalf("service tier = %q, want priority", logs[0].ServiceTier)
 	}
 	if logs[0].CacheReadTokens != 23 {
 		t.Fatalf("cache read tokens = %d, want 23", logs[0].CacheReadTokens)
@@ -148,6 +152,7 @@ func TestDashboardRequestMonitorMiddlewarePublishesLiveMetadataFromHandler(t *te
 	router.POST("/v1/responses", func(c *gin.Context) {
 		dashboard.SetRequestModel(c, "gpt-5.3-codex(high)")
 		dashboard.SetRequestThinkingLevel(c, "high")
+		dashboard.SetRequestServiceTier(c, dashboard.ResolveRequestServiceTier([]byte(`{"service_tier":"priority"}`)))
 		dashboard.PublishRequestLiveInfo(c)
 		c.JSON(http.StatusOK, gin.H{"ok": true})
 	})
@@ -173,5 +178,8 @@ func TestDashboardRequestMonitorMiddlewarePublishesLiveMetadataFromHandler(t *te
 	}
 	if updated.ThinkingLevel != "high" {
 		t.Fatalf("thinking level = %q, want high", updated.ThinkingLevel)
+	}
+	if updated.ServiceTier != "priority" {
+		t.Fatalf("service tier = %q, want priority", updated.ServiceTier)
 	}
 }
