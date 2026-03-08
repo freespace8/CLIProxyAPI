@@ -946,18 +946,18 @@ func ConvertOpenAIChatCompletionsResponseToOpenAIResponses(ctx context.Context, 
 		st.Created = root.Get("created").Int()
 		st.CompletedRequestFields = buildCompletedRequestFields(requestRawJSON)
 		// reset aggregation state for a new streaming response
-		st.MsgTextBuf = make(map[int]*strings.Builder)
+		st.MsgTextBuf = nil
 		st.ReasoningBuf.Reset()
 		st.ReasoningID = ""
 		st.ReasoningIndex = 0
-		st.FuncArgsBuf = make(map[int]*strings.Builder)
-		st.FuncNames = make(map[int]string)
-		st.FuncCallIDs = make(map[int]string)
-		st.MsgItemAdded = make(map[int]bool)
-		st.MsgContentAdded = make(map[int]bool)
-		st.MsgItemDone = make(map[int]bool)
-		st.FuncArgsDone = make(map[int]bool)
-		st.FuncItemDone = make(map[int]bool)
+		st.FuncArgsBuf = nil
+		st.FuncNames = nil
+		st.FuncCallIDs = nil
+		st.MsgItemAdded = nil
+		st.MsgContentAdded = nil
+		st.MsgItemDone = nil
+		st.FuncArgsDone = nil
+		st.FuncItemDone = nil
 		st.PromptTokens = 0
 		st.CachedTokens = 0
 		st.CompletionTokens = 0
@@ -995,15 +995,24 @@ func ConvertOpenAIChatCompletionsResponseToOpenAIResponses(ctx context.Context, 
 					itemID := messageItemID(st.ResponseID, idx)
 					if !st.MsgItemAdded[idx] {
 						out = append(out, messageOutputItemAddedEvent(nextSeq(), itemID, idx))
+						if st.MsgItemAdded == nil {
+							st.MsgItemAdded = make(map[int]bool)
+						}
 						st.MsgItemAdded[idx] = true
 					}
 					if !st.MsgContentAdded[idx] {
 						out = append(out, contentPartAddedEvent(nextSeq(), itemID, idx))
+						if st.MsgContentAdded == nil {
+							st.MsgContentAdded = make(map[int]bool)
+						}
 						st.MsgContentAdded[idx] = true
 					}
 
 					out = append(out, outputTextDeltaEvent(nextSeq(), itemID, idx, contentText))
 					// aggregate for response.output
+					if st.MsgTextBuf == nil {
+						st.MsgTextBuf = make(map[int]*strings.Builder)
+					}
 					if st.MsgTextBuf[idx] == nil {
 						st.MsgTextBuf[idx] = &strings.Builder{}
 					}
@@ -1039,6 +1048,9 @@ func ConvertOpenAIChatCompletionsResponseToOpenAIResponses(ctx context.Context, 
 							fullText = b.String()
 						}
 						out = appendMessageDoneEvents(out, st.ResponseID, idx, fullText, nextSeq)
+						if st.MsgItemDone == nil {
+							st.MsgItemDone = make(map[int]bool)
+						}
 						st.MsgItemDone[idx] = true
 					}
 
@@ -1048,6 +1060,9 @@ func ConvertOpenAIChatCompletionsResponseToOpenAIResponses(ctx context.Context, 
 					newCallID := firstToolCall.Get("id").String()
 					nameChunk := functionCall.Get("name").String()
 					if nameChunk != "" {
+						if st.FuncNames == nil {
+							st.FuncNames = make(map[int]string)
+						}
 						st.FuncNames[idx] = nameChunk
 					}
 					existingCallID := st.FuncCallIDs[idx]
@@ -1056,6 +1071,9 @@ func ConvertOpenAIChatCompletionsResponseToOpenAIResponses(ctx context.Context, 
 					if existingCallID == "" && newCallID != "" {
 						// First time seeing a valid call_id for this index
 						effectiveCallID = newCallID
+						if st.FuncCallIDs == nil {
+							st.FuncCallIDs = make(map[int]string)
+						}
 						st.FuncCallIDs[idx] = newCallID
 						shouldEmitItem = true
 					}
@@ -1066,6 +1084,9 @@ func ConvertOpenAIChatCompletionsResponseToOpenAIResponses(ctx context.Context, 
 					}
 
 					// Ensure args buffer exists for this index
+					if st.FuncArgsBuf == nil {
+						st.FuncArgsBuf = make(map[int]*strings.Builder)
+					}
 					if st.FuncArgsBuf[idx] == nil {
 						st.FuncArgsBuf[idx] = &strings.Builder{}
 					}
@@ -1100,6 +1121,9 @@ func ConvertOpenAIChatCompletionsResponseToOpenAIResponses(ctx context.Context, 
 								fullText = b.String()
 							}
 							out = appendMessageDoneEvents(out, st.ResponseID, i, fullText, nextSeq)
+							if st.MsgItemDone == nil {
+								st.MsgItemDone = make(map[int]bool)
+							}
 							st.MsgItemDone[i] = true
 						}
 					}
@@ -1123,7 +1147,13 @@ func ConvertOpenAIChatCompletionsResponseToOpenAIResponses(ctx context.Context, 
 							args = b.String()
 						}
 						out = appendFunctionDoneEvents(out, callID, i, args, st.FuncNames[i], nextSeq)
+						if st.FuncItemDone == nil {
+							st.FuncItemDone = make(map[int]bool)
+						}
 						st.FuncItemDone[i] = true
+						if st.FuncArgsDone == nil {
+							st.FuncArgsDone = make(map[int]bool)
+						}
 						st.FuncArgsDone[i] = true
 					}
 				}
