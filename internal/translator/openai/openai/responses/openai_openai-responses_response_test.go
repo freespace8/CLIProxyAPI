@@ -54,6 +54,12 @@ func TestConvertOpenAIChatCompletionsResponseToOpenAIResponsesEmitsCompletedUsag
 	if got := completed.Get("response.output.0.content.0.text").String(); got != "你好，世界" {
 		t.Fatalf("completed text = %q, want %q", got, "你好，世界")
 	}
+	if got := completed.Get("response.model").String(); got != "gpt-5.4" {
+		t.Fatalf("response.model = %q, want %q", got, "gpt-5.4")
+	}
+	if got := completed.Get("response.instructions").String(); got != "请简短回答" {
+		t.Fatalf("response.instructions = %q, want %q", got, "请简短回答")
+	}
 	if got := completed.Get("response.usage.input_tokens").Int(); got != 8 {
 		t.Fatalf("input_tokens = %d, want %d", got, 8)
 	}

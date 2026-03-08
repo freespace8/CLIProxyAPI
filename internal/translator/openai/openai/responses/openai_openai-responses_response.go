@@ -19,13 +19,13 @@ type oaiToResponsesStateReasoning struct {
 	ReasoningData string
 }
 type oaiToResponsesState struct {
-	Seq            int
-	ResponseID     string
-	Created        int64
-	Started        bool
+	Seq                    int
+	ResponseID             string
+	Created                int64
+	Started                bool
 	CompletedRequestFields string
-	ReasoningID    string
-	ReasoningIndex int
+	ReasoningID            string
+	ReasoningIndex         int
 	// aggregation buffers for response.output
 	// Per-output message text buffers by index
 	MsgTextBuf   map[int]*strings.Builder
@@ -542,6 +542,7 @@ func ConvertOpenAIChatCompletionsResponseToOpenAIResponses(ctx context.Context, 
 	if !st.Started {
 		st.ResponseID = root.Get("id").String()
 		st.Created = root.Get("created").Int()
+		st.CompletedRequestFields = buildCompletedRequestFields(requestRawJSON)
 		// reset aggregation state for a new streaming response
 		st.MsgTextBuf = make(map[int]*strings.Builder)
 		st.ReasoningBuf.Reset()
@@ -749,74 +750,6 @@ func ConvertOpenAIChatCompletionsResponseToOpenAIResponses(ctx context.Context, 
 						st.FuncArgsDone[i] = true
 					}
 				}
-				completed := `{"type":"response.completed","sequence_number":0,"response":{"id":"","object":"response","created_at":0,"status":"completed","background":false,"error":null}}`
-				completed, _ = sjson.Set(completed, "sequence_number", nextSeq())
-				completed, _ = sjson.Set(completed, "response.id", st.ResponseID)
-				completed, _ = sjson.Set(completed, "response.created_at", st.Created)
-				// Inject original request fields into response as per docs/response.completed.json
-				if requestRawJSON != nil {
-					req := gjson.ParseBytes(requestRawJSON)
-					if v := req.Get("instructions"); v.Exists() {
-						completed, _ = sjson.Set(completed, "response.instructions", v.String())
-					}
-					if v := req.Get("max_output_tokens"); v.Exists() {
-						completed, _ = sjson.Set(completed, "response.max_output_tokens", v.Int())
-					}
-					if v := req.Get("max_tool_calls"); v.Exists() {
-						completed, _ = sjson.Set(completed, "response.max_tool_calls", v.Int())
-					}
-					if v := req.Get("model"); v.Exists() {
-						completed, _ = sjson.Set(completed, "response.model", v.String())
-					}
-					if v := req.Get("parallel_tool_calls"); v.Exists() {
-						completed, _ = sjson.Set(completed, "response.parallel_tool_calls", v.Bool())
-					}
-					if v := req.Get("previous_response_id"); v.Exists() {
-						completed, _ = sjson.Set(completed, "response.previous_response_id", v.String())
-					}
-					if v := req.Get("prompt_cache_key"); v.Exists() {
-						completed, _ = sjson.Set(completed, "response.prompt_cache_key", v.String())
-					}
-					if v := req.Get("reasoning"); v.Exists() {
-						completed, _ = sjson.Set(completed, "response.reasoning", v.Value())
-					}
-					if v := req.Get("safety_identifier"); v.Exists() {
-						completed, _ = sjson.Set(completed, "response.safety_identifier", v.String())
-					}
-					if v := req.Get("service_tier"); v.Exists() {
-						completed, _ = sjson.Set(completed, "response.service_tier", v.String())
-					}
-					if v := req.Get("store"); v.Exists() {
-						completed, _ = sjson.Set(completed, "response.store", v.Bool())
-					}
-					if v := req.Get("temperature"); v.Exists() {
-						completed, _ = sjson.Set(completed, "response.temperature", v.Float())
-					}
-					if v := req.Get("text"); v.Exists() {
-						completed, _ = sjson.Set(completed, "response.text", v.Value())
-					}
-					if v := req.Get("tool_choice"); v.Exists() {
-						completed, _ = sjson.Set(completed, "response.tool_choice", v.Value())
-					}
-					if v := req.Get("tools"); v.Exists() {
-						completed, _ = sjson.Set(completed, "response.tools", v.Value())
-					}
-					if v := req.Get("top_logprobs"); v.Exists() {
-						completed, _ = sjson.Set(completed, "response.top_logprobs", v.Int())
-					}
-					if v := req.Get("top_p"); v.Exists() {
-						completed, _ = sjson.Set(completed, "response.top_p", v.Float())
-					}
-					if v := req.Get("truncation"); v.Exists() {
-						completed, _ = sjson.Set(completed, "response.truncation", v.String())
-					}
-					if v := req.Get("user"); v.Exists() {
-						completed, _ = sjson.Set(completed, "response.user", v.Value())
-					}
-					if v := req.Get("metadata"); v.Exists() {
-						completed, _ = sjson.Set(completed, "response.metadata", v.Value())
-					}
-				}
 				// Build response.output using aggregated buffers
 				outputItems := make([]string, 0, len(st.Reasonings)+len(st.MsgItemAdded)+len(st.FuncArgsBuf))
 				if len(st.Reasonings) > 0 {
@@ -847,22 +780,8 @@ func ConvertOpenAIChatCompletionsResponseToOpenAIResponses(ctx context.Context, 
 						outputItems = append(outputItems, completedFunctionItemPayload(functionItemID(callID), args, callID, name))
 					}
 				}
-				if outputArray := jsonArrayFromRawItems(outputItems); outputArray != "" {
-					completed, _ = sjson.SetRaw(completed, "response.output", outputArray)
-				}
-				if st.UsageSeen {
-					completed, _ = sjson.Set(completed, "response.usage.input_tokens", st.PromptTokens)
-					completed, _ = sjson.Set(completed, "response.usage.input_tokens_details.cached_tokens", st.CachedTokens)
-					completed, _ = sjson.Set(completed, "response.usage.output_tokens", st.CompletionTokens)
-					if st.ReasoningTokens > 0 {
-						completed, _ = sjson.Set(completed, "response.usage.output_tokens_details.reasoning_tokens", st.ReasoningTokens)
-					}
-					total := st.TotalTokens
-					if total == 0 {
-						total = st.PromptTokens + st.CompletionTokens
-					}
-					completed, _ = sjson.Set(completed, "response.usage.total_tokens", total)
-				}
+				outputArray := jsonArrayFromRawItems(outputItems)
+				completed := completedPayload(nextSeq(), st.ResponseID, st.Created, st.CompletedRequestFields, outputArray, st.PromptTokens, st.CachedTokens, st.CompletionTokens, st.TotalTokens, st.ReasoningTokens, st.UsageSeen)
 				out = append(out, emitRespEvent("response.completed", completed))
 			}
 
