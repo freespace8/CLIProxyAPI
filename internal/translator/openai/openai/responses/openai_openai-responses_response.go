@@ -54,7 +54,13 @@ type oaiToResponsesState struct {
 var responseIDCounter uint64
 
 func emitRespEvent(event string, payload string) string {
-	return "event: " + event + "\ndata: " + payload
+	var builder strings.Builder
+	builder.Grow(len(event) + len(payload) + len("event: \ndata: "))
+	builder.WriteString("event: ")
+	builder.WriteString(event)
+	builder.WriteString("\ndata: ")
+	builder.WriteString(payload)
+	return builder.String()
 }
 
 func messageItemID(responseID string, idx int) string {
@@ -625,6 +631,7 @@ func ConvertOpenAIChatCompletionsResponseToOpenAIResponses(ctx context.Context, 
 
 				// reasoning_content (OpenAI reasoning incremental text)
 				if rc := delta.Get("reasoning_content"); rc.Exists() && rc.String() != "" {
+					reasoningText := rc.String()
 					// On first appearance, add reasoning item and part
 					if st.ReasoningID == "" {
 						st.ReasoningID = reasoningItemID(st.ResponseID, idx)
@@ -641,12 +648,12 @@ func ConvertOpenAIChatCompletionsResponseToOpenAIResponses(ctx context.Context, 
 						out = append(out, emitRespEvent("response.reasoning_summary_part.added", part))
 					}
 					// Append incremental text to reasoning buffer
-					st.ReasoningBuf.WriteString(rc.String())
+					st.ReasoningBuf.WriteString(reasoningText)
 					msg := `{"type":"response.reasoning_summary_text.delta","sequence_number":0,"item_id":"","output_index":0,"summary_index":0,"delta":""}`
 					msg, _ = sjson.Set(msg, "sequence_number", nextSeq())
 					msg, _ = sjson.Set(msg, "item_id", st.ReasoningID)
 					msg, _ = sjson.Set(msg, "output_index", st.ReasoningIndex)
-					msg, _ = sjson.Set(msg, "delta", rc.String())
+					msg, _ = sjson.Set(msg, "delta", reasoningText)
 					out = append(out, emitRespEvent("response.reasoning_summary_text.delta", msg))
 				}
 
@@ -668,8 +675,10 @@ func ConvertOpenAIChatCompletionsResponseToOpenAIResponses(ctx context.Context, 
 					}
 
 					// Only emit item.added once per tool call and preserve call_id across chunks.
-					newCallID := tcs.Get("0.id").String()
-					nameChunk := tcs.Get("0.function.name").String()
+					firstToolCall := tcs.Get("0")
+					functionCall := firstToolCall.Get("function")
+					newCallID := firstToolCall.Get("id").String()
+					nameChunk := functionCall.Get("name").String()
 					if nameChunk != "" {
 						st.FuncNames[idx] = nameChunk
 					}
@@ -694,8 +703,8 @@ func ConvertOpenAIChatCompletionsResponseToOpenAIResponses(ctx context.Context, 
 					}
 
 					// Append arguments delta if available and we have a valid call_id to reference
-					if args := tcs.Get("0.function.arguments"); args.Exists() && args.String() != "" {
-						argsText := args.String()
+					argsText := functionCall.Get("arguments").String()
+					if argsText != "" {
 						// Prefer an already known call_id; fall back to newCallID if first time
 						refCallID := st.FuncCallIDs[idx]
 						if refCallID == "" {
