@@ -185,6 +185,55 @@ func TestConvertOpenAIChatCompletionsResponseToOpenAIResponsesEscapesFunctionArg
 	}
 }
 
+func TestConvertOpenAIChatCompletionsResponseToOpenAIResponsesReasoningStream(t *testing.T) {
+	chunks := [][]byte{
+		[]byte(`data: {"id":"chatcmpl-reasoning","created":4,"object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"第一步分析"}}]}`),
+		[]byte(`data: {"id":"chatcmpl-reasoning","created":4,"object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"，第二步分析"}}]}`),
+		[]byte(`data: {"id":"chatcmpl-reasoning","created":4,"object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":6,"total_tokens":16,"output_tokens_details":{"reasoning_tokens":4}}}`),
+	}
+
+	requestRawJSON := []byte(`{"model":"gpt-5.4","reasoning":{"effort":"high"}}`)
+	var param any
+	var out []string
+	for _, chunk := range chunks {
+		out = append(out, ConvertOpenAIChatCompletionsResponseToOpenAIResponses(context.Background(), "gpt-5.4", requestRawJSON, requestRawJSON, chunk, &param)...)
+	}
+
+	var deltaSeen bool
+	var textDoneSeen bool
+	var completed gjson.Result
+	for _, chunk := range out {
+		event, data := parseOpenAIResponsesSSEChunk(t, chunk)
+		switch event {
+		case "response.reasoning_summary_text.delta":
+			deltaSeen = true
+		case "response.reasoning_summary_text.done":
+			textDoneSeen = true
+			if got := data.Get("text").String(); got != "第一步分析，第二步分析" {
+				t.Fatalf("reasoning text done = %q, want %q", got, "第一步分析，第二步分析")
+			}
+		case "response.completed":
+			completed = data
+		}
+	}
+
+	if !deltaSeen {
+		t.Fatal("missing response.reasoning_summary_text.delta event")
+	}
+	if !textDoneSeen {
+		t.Fatal("missing response.reasoning_summary_text.done event")
+	}
+	if got := completed.Get("response.output.0.type").String(); got != "reasoning" {
+		t.Fatalf("completed output type = %q, want %q", got, "reasoning")
+	}
+	if got := completed.Get("response.output.0.summary.0.text").String(); got != "第一步分析，第二步分析" {
+		t.Fatalf("completed reasoning = %q, want %q", got, "第一步分析，第二步分析")
+	}
+	if got := completed.Get("response.usage.output_tokens_details.reasoning_tokens").Int(); got != 4 {
+		t.Fatalf("reasoning_tokens = %d, want %d", got, 4)
+	}
+}
+
 func TestConvertOpenAIChatCompletionsResponseToOpenAIResponsesNonStreamUsage(t *testing.T) {
 	rawJSON := []byte(`{
 		"id":"chatcmpl-nonstream",
@@ -248,6 +297,27 @@ func BenchmarkConvertOpenAIChatCompletionsResponseToOpenAIResponses(b *testing.B
 		[]byte(`data: {"id":"chatcmpl-1","created":1,"object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":64,"completion_tokens":32,"total_tokens":96,"prompt_tokens_details":{"cached_tokens":12}}}`),
 	}
 	requestRawJSON := []byte(`{"model":"gpt-5.4","instructions":"请简短回答","tools":[{"type":"function","name":"lookup","parameters":{"type":"object"}}]}`)
+
+	b.ReportAllocs()
+	for b.Loop() {
+		var param any
+		total := 0
+		for _, chunk := range chunks {
+			total += len(ConvertOpenAIChatCompletionsResponseToOpenAIResponses(context.Background(), "gpt-5.4", requestRawJSON, requestRawJSON, chunk, &param))
+		}
+		if total == 0 {
+			b.Fatal("translator returned no events")
+		}
+	}
+}
+
+func BenchmarkConvertOpenAIChatCompletionsResponseToOpenAIResponsesReasoning(b *testing.B) {
+	chunks := [][]byte{
+		[]byte(`data: {"id":"chatcmpl-reasoning","created":4,"object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"第一步分析"}}]}`),
+		[]byte(`data: {"id":"chatcmpl-reasoning","created":4,"object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning_content":"，第二步分析"}}]}`),
+		[]byte(`data: {"id":"chatcmpl-reasoning","created":4,"object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":6,"total_tokens":16,"output_tokens_details":{"reasoning_tokens":4}}}`),
+	}
+	requestRawJSON := []byte(`{"model":"gpt-5.4","reasoning":{"effort":"high"}}`)
 
 	b.ReportAllocs()
 	for b.Loop() {
