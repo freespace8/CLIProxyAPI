@@ -14,7 +14,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/interfaces"
-	"github.com/router-for-me/CLIProxyAPI/v6/internal/jsonfast"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/registry"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/thinking"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/util"
@@ -562,21 +561,57 @@ func mergeJSONArrayRaw(existingRaw, appendRaw string) (string, error) {
 		appendRaw = "[]"
 	}
 
-	var existing []stdjson.RawMessage
-	if err := jsonfast.Unmarshal([]byte(existingRaw), &existing); err != nil {
-		return "", err
+	if !gjson.Valid(existingRaw) {
+		return "", fmt.Errorf("invalid JSON")
 	}
-	var appendItems []stdjson.RawMessage
-	if err := jsonfast.Unmarshal([]byte(appendRaw), &appendItems); err != nil {
-		return "", err
+	if !gjson.Valid(appendRaw) {
+		return "", fmt.Errorf("invalid JSON")
 	}
 
-	merged := append(existing, appendItems...)
-	out, err := jsonfast.Marshal(merged)
+	existingInner, existingEmpty, err := validatedJSONArrayInner(existingRaw)
 	if err != nil {
 		return "", err
 	}
-	return string(out), nil
+	appendInner, appendEmpty, err := validatedJSONArrayInner(appendRaw)
+	if err != nil {
+		return "", err
+	}
+
+	if existingEmpty {
+		return appendRaw, nil
+	}
+	if appendEmpty {
+		return existingRaw, nil
+	}
+
+	var builder strings.Builder
+	builder.Grow(len(existingInner) + len(appendInner) + 3)
+	builder.WriteByte('[')
+	builder.WriteString(existingInner)
+	builder.WriteByte(',')
+	builder.WriteString(appendInner)
+	builder.WriteByte(']')
+	return builder.String(), nil
+}
+
+func validatedJSONArrayInner(raw string) (string, bool, error) {
+	if len(raw) < 2 || raw[0] != '[' || raw[len(raw)-1] != ']' {
+		return "", false, fmt.Errorf("json value is not array")
+	}
+
+	inner := raw[1 : len(raw)-1]
+	empty := true
+	for idx := 0; idx < len(inner); idx++ {
+		switch inner[idx] {
+		case ' ', '\t', '\n', '\r':
+			continue
+		default:
+			empty = false
+			return inner, false, nil
+		}
+	}
+
+	return inner, empty, nil
 }
 
 func normalizeJSONArrayRaw(raw []byte) string {
