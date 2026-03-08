@@ -101,6 +101,70 @@ func jsonArrayFromRawItems(items []string) string {
 	return builder.String()
 }
 
+func outputTextDeltaPayload(seq int, itemID string, outputIndex int, delta string) string {
+	buf := make([]byte, 0, len(itemID)+len(delta)+128)
+	buf = append(buf, `{"type":"response.output_text.delta","sequence_number":`...)
+	buf = strconv.AppendInt(buf, int64(seq), 10)
+	buf = append(buf, `,"item_id":`...)
+	buf = strconv.AppendQuote(buf, itemID)
+	buf = append(buf, `,"output_index":`...)
+	buf = strconv.AppendInt(buf, int64(outputIndex), 10)
+	buf = append(buf, `,"content_index":0,"delta":`...)
+	buf = strconv.AppendQuote(buf, delta)
+	buf = append(buf, `,"logprobs":[]}`...)
+	return string(buf)
+}
+
+func outputTextDonePayload(seq int, itemID string, outputIndex int, text string) string {
+	buf := make([]byte, 0, len(itemID)+len(text)+128)
+	buf = append(buf, `{"type":"response.output_text.done","sequence_number":`...)
+	buf = strconv.AppendInt(buf, int64(seq), 10)
+	buf = append(buf, `,"item_id":`...)
+	buf = strconv.AppendQuote(buf, itemID)
+	buf = append(buf, `,"output_index":`...)
+	buf = strconv.AppendInt(buf, int64(outputIndex), 10)
+	buf = append(buf, `,"content_index":0,"text":`...)
+	buf = strconv.AppendQuote(buf, text)
+	buf = append(buf, `,"logprobs":[]}`...)
+	return string(buf)
+}
+
+func contentPartDonePayload(seq int, itemID string, outputIndex int, text string) string {
+	buf := make([]byte, 0, len(itemID)+len(text)+176)
+	buf = append(buf, `{"type":"response.content_part.done","sequence_number":`...)
+	buf = strconv.AppendInt(buf, int64(seq), 10)
+	buf = append(buf, `,"item_id":`...)
+	buf = strconv.AppendQuote(buf, itemID)
+	buf = append(buf, `,"output_index":`...)
+	buf = strconv.AppendInt(buf, int64(outputIndex), 10)
+	buf = append(buf, `,"content_index":0,"part":{"type":"output_text","annotations":[],"logprobs":[],"text":`...)
+	buf = strconv.AppendQuote(buf, text)
+	buf = append(buf, `}}`...)
+	return string(buf)
+}
+
+func messageOutputItemDonePayload(seq int, itemID string, outputIndex int, text string) string {
+	buf := make([]byte, 0, len(itemID)+len(text)+192)
+	buf = append(buf, `{"type":"response.output_item.done","sequence_number":`...)
+	buf = strconv.AppendInt(buf, int64(seq), 10)
+	buf = append(buf, `,"output_index":`...)
+	buf = strconv.AppendInt(buf, int64(outputIndex), 10)
+	buf = append(buf, `,"item":{"id":`...)
+	buf = strconv.AppendQuote(buf, itemID)
+	buf = append(buf, `,"type":"message","status":"completed","content":[{"type":"output_text","annotations":[],"logprobs":[],"text":`...)
+	buf = strconv.AppendQuote(buf, text)
+	buf = append(buf, `}],"role":"assistant"}}`...)
+	return string(buf)
+}
+
+func appendMessageDoneEvents(out []string, responseID string, outputIndex int, text string, nextSeq func() int) []string {
+	itemID := messageItemID(responseID, outputIndex)
+	out = append(out, emitRespEvent("response.output_text.done", outputTextDonePayload(nextSeq(), itemID, outputIndex, text)))
+	out = append(out, emitRespEvent("response.content_part.done", contentPartDonePayload(nextSeq(), itemID, outputIndex, text)))
+	out = append(out, emitRespEvent("response.output_item.done", messageOutputItemDonePayload(nextSeq(), itemID, outputIndex, text)))
+	return out
+}
+
 // ConvertOpenAIChatCompletionsResponseToOpenAIResponses converts OpenAI Chat Completions streaming chunks
 // to OpenAI Responses SSE events (response.*).
 func ConvertOpenAIChatCompletionsResponseToOpenAIResponses(ctx context.Context, modelName string, originalRequestRawJSON, requestRawJSON, rawJSON []byte, param *any) []string {
@@ -242,41 +306,37 @@ func ConvertOpenAIChatCompletionsResponseToOpenAIResponses(ctx context.Context, 
 			delta := choice.Get("delta")
 			if delta.Exists() {
 				if c := delta.Get("content"); c.Exists() && c.String() != "" {
+					contentText := c.String()
 					// Ensure the message item and its first content part are announced before any text deltas
 					if st.ReasoningID != "" {
 						stopReasoning(st.ReasoningBuf.String())
 						st.ReasoningBuf.Reset()
 					}
+					itemID := messageItemID(st.ResponseID, idx)
 					if !st.MsgItemAdded[idx] {
 						item := `{"type":"response.output_item.added","sequence_number":0,"output_index":0,"item":{"id":"","type":"message","status":"in_progress","content":[],"role":"assistant"}}`
 						item, _ = sjson.Set(item, "sequence_number", nextSeq())
 						item, _ = sjson.Set(item, "output_index", idx)
-						item, _ = sjson.Set(item, "item.id", messageItemID(st.ResponseID, idx))
+						item, _ = sjson.Set(item, "item.id", itemID)
 						out = append(out, emitRespEvent("response.output_item.added", item))
 						st.MsgItemAdded[idx] = true
 					}
 					if !st.MsgContentAdded[idx] {
 						part := `{"type":"response.content_part.added","sequence_number":0,"item_id":"","output_index":0,"content_index":0,"part":{"type":"output_text","annotations":[],"logprobs":[],"text":""}}`
 						part, _ = sjson.Set(part, "sequence_number", nextSeq())
-						part, _ = sjson.Set(part, "item_id", messageItemID(st.ResponseID, idx))
+						part, _ = sjson.Set(part, "item_id", itemID)
 						part, _ = sjson.Set(part, "output_index", idx)
 						part, _ = sjson.Set(part, "content_index", 0)
 						out = append(out, emitRespEvent("response.content_part.added", part))
 						st.MsgContentAdded[idx] = true
 					}
 
-					msg := `{"type":"response.output_text.delta","sequence_number":0,"item_id":"","output_index":0,"content_index":0,"delta":"","logprobs":[]}`
-					msg, _ = sjson.Set(msg, "sequence_number", nextSeq())
-					msg, _ = sjson.Set(msg, "item_id", messageItemID(st.ResponseID, idx))
-					msg, _ = sjson.Set(msg, "output_index", idx)
-					msg, _ = sjson.Set(msg, "content_index", 0)
-					msg, _ = sjson.Set(msg, "delta", c.String())
-					out = append(out, emitRespEvent("response.output_text.delta", msg))
+					out = append(out, emitRespEvent("response.output_text.delta", outputTextDeltaPayload(nextSeq(), itemID, idx, contentText)))
 					// aggregate for response.output
 					if st.MsgTextBuf[idx] == nil {
 						st.MsgTextBuf[idx] = &strings.Builder{}
 					}
-					st.MsgTextBuf[idx].WriteString(c.String())
+					st.MsgTextBuf[idx].WriteString(contentText)
 				}
 
 				// reasoning_content (OpenAI reasoning incremental text)
@@ -319,28 +379,7 @@ func ConvertOpenAIChatCompletionsResponseToOpenAIResponses(ctx context.Context, 
 						if b := st.MsgTextBuf[idx]; b != nil {
 							fullText = b.String()
 						}
-						done := `{"type":"response.output_text.done","sequence_number":0,"item_id":"","output_index":0,"content_index":0,"text":"","logprobs":[]}`
-						done, _ = sjson.Set(done, "sequence_number", nextSeq())
-						done, _ = sjson.Set(done, "item_id", messageItemID(st.ResponseID, idx))
-						done, _ = sjson.Set(done, "output_index", idx)
-						done, _ = sjson.Set(done, "content_index", 0)
-						done, _ = sjson.Set(done, "text", fullText)
-						out = append(out, emitRespEvent("response.output_text.done", done))
-
-						partDone := `{"type":"response.content_part.done","sequence_number":0,"item_id":"","output_index":0,"content_index":0,"part":{"type":"output_text","annotations":[],"logprobs":[],"text":""}}`
-						partDone, _ = sjson.Set(partDone, "sequence_number", nextSeq())
-						partDone, _ = sjson.Set(partDone, "item_id", messageItemID(st.ResponseID, idx))
-						partDone, _ = sjson.Set(partDone, "output_index", idx)
-						partDone, _ = sjson.Set(partDone, "content_index", 0)
-						partDone, _ = sjson.Set(partDone, "part.text", fullText)
-						out = append(out, emitRespEvent("response.content_part.done", partDone))
-
-						itemDone := `{"type":"response.output_item.done","sequence_number":0,"output_index":0,"item":{"id":"","type":"message","status":"completed","content":[{"type":"output_text","annotations":[],"logprobs":[],"text":""}],"role":"assistant"}}`
-						itemDone, _ = sjson.Set(itemDone, "sequence_number", nextSeq())
-						itemDone, _ = sjson.Set(itemDone, "output_index", idx)
-						itemDone, _ = sjson.Set(itemDone, "item.id", messageItemID(st.ResponseID, idx))
-						itemDone, _ = sjson.Set(itemDone, "item.content.0.text", fullText)
-						out = append(out, emitRespEvent("response.output_item.done", itemDone))
+						out = appendMessageDoneEvents(out, st.ResponseID, idx, fullText, nextSeq)
 						st.MsgItemDone[idx] = true
 					}
 
@@ -409,28 +448,7 @@ func ConvertOpenAIChatCompletionsResponseToOpenAIResponses(ctx context.Context, 
 							if b := st.MsgTextBuf[i]; b != nil {
 								fullText = b.String()
 							}
-							done := `{"type":"response.output_text.done","sequence_number":0,"item_id":"","output_index":0,"content_index":0,"text":"","logprobs":[]}`
-							done, _ = sjson.Set(done, "sequence_number", nextSeq())
-							done, _ = sjson.Set(done, "item_id", messageItemID(st.ResponseID, i))
-							done, _ = sjson.Set(done, "output_index", i)
-							done, _ = sjson.Set(done, "content_index", 0)
-							done, _ = sjson.Set(done, "text", fullText)
-							out = append(out, emitRespEvent("response.output_text.done", done))
-
-							partDone := `{"type":"response.content_part.done","sequence_number":0,"item_id":"","output_index":0,"content_index":0,"part":{"type":"output_text","annotations":[],"logprobs":[],"text":""}}`
-							partDone, _ = sjson.Set(partDone, "sequence_number", nextSeq())
-							partDone, _ = sjson.Set(partDone, "item_id", messageItemID(st.ResponseID, i))
-							partDone, _ = sjson.Set(partDone, "output_index", i)
-							partDone, _ = sjson.Set(partDone, "content_index", 0)
-							partDone, _ = sjson.Set(partDone, "part.text", fullText)
-							out = append(out, emitRespEvent("response.content_part.done", partDone))
-
-							itemDone := `{"type":"response.output_item.done","sequence_number":0,"output_index":0,"item":{"id":"","type":"message","status":"completed","content":[{"type":"output_text","annotations":[],"logprobs":[],"text":""}],"role":"assistant"}}`
-							itemDone, _ = sjson.Set(itemDone, "sequence_number", nextSeq())
-							itemDone, _ = sjson.Set(itemDone, "output_index", i)
-							itemDone, _ = sjson.Set(itemDone, "item.id", messageItemID(st.ResponseID, i))
-							itemDone, _ = sjson.Set(itemDone, "item.content.0.text", fullText)
-							out = append(out, emitRespEvent("response.output_item.done", itemDone))
+							out = appendMessageDoneEvents(out, st.ResponseID, i, fullText, nextSeq)
 							st.MsgItemDone[i] = true
 						}
 					}

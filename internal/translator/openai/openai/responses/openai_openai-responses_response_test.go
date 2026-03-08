@@ -68,6 +68,41 @@ func TestConvertOpenAIChatCompletionsResponseToOpenAIResponsesEmitsCompletedUsag
 	}
 }
 
+func TestConvertOpenAIChatCompletionsResponseToOpenAIResponsesEscapesStreamingText(t *testing.T) {
+	chunks := [][]byte{
+		[]byte("data: {\"id\":\"chatcmpl-escape\",\"created\":2,\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"第一行\\n\\\"quoted\\\"\"}}]}"),
+		[]byte(`data: {"id":"chatcmpl-escape","created":2,"object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`),
+	}
+
+	var param any
+	var out []string
+	for _, chunk := range chunks {
+		out = append(out, ConvertOpenAIChatCompletionsResponseToOpenAIResponses(context.Background(), "gpt-5.4", nil, nil, chunk, &param)...)
+	}
+
+	var deltaSeen bool
+	var completed gjson.Result
+	for _, chunk := range out {
+		event, data := parseOpenAIResponsesSSEChunk(t, chunk)
+		switch event {
+		case "response.output_text.delta":
+			deltaSeen = true
+			if got := data.Get("delta").String(); got != "第一行\n\"quoted\"" {
+				t.Fatalf("delta = %q, want %q", got, "第一行\n\"quoted\"")
+			}
+		case "response.completed":
+			completed = data
+		}
+	}
+
+	if !deltaSeen {
+		t.Fatal("missing response.output_text.delta event")
+	}
+	if got := completed.Get("response.output.0.content.0.text").String(); got != "第一行\n\"quoted\"" {
+		t.Fatalf("completed text = %q, want %q", got, "第一行\n\"quoted\"")
+	}
+}
+
 func BenchmarkConvertOpenAIChatCompletionsResponseToOpenAIResponses(b *testing.B) {
 	chunks := [][]byte{
 		[]byte(`data: {"id":"chatcmpl-1","created":1,"object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"第一段"}}]}`),
