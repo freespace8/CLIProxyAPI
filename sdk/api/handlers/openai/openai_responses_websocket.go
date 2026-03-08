@@ -291,7 +291,7 @@ func normalizeResponseSubsequentRequest(rawJSON []byte, lastRequest []byte, last
 	}
 
 	existingInput := lastNormalizedRequest.Get("input")
-	mergedInput, errMerge := mergeJSONArrayRaw(existingInput.Raw, normalizeJSONArrayRaw(lastResponseOutput))
+	mergedInput, errMerge := mergeJSONArrayRawTrusted(existingInput.Raw, normalizeJSONArrayRaw(lastResponseOutput))
 	if errMerge != nil {
 		return nil, lastRequest, &interfaces.ErrorMessage{
 			StatusCode: http.StatusBadRequest,
@@ -560,6 +560,42 @@ func mergeJSONArrayRaw(existingRaw, appendRaw string) (string, error) {
 	}
 	if !gjson.Valid(appendRaw) {
 		return "", fmt.Errorf("invalid JSON")
+	}
+
+	existingInner, existingEmpty, err := validatedJSONArrayInner(existingRaw)
+	if err != nil {
+		return "", err
+	}
+	appendInner, appendEmpty, err := validatedJSONArrayInner(appendRaw)
+	if err != nil {
+		return "", err
+	}
+
+	if existingEmpty {
+		return appendRaw, nil
+	}
+	if appendEmpty {
+		return existingRaw, nil
+	}
+
+	var builder strings.Builder
+	builder.Grow(len(existingInner) + len(appendInner) + 3)
+	builder.WriteByte('[')
+	builder.WriteString(existingInner)
+	builder.WriteByte(',')
+	builder.WriteString(appendInner)
+	builder.WriteByte(']')
+	return builder.String(), nil
+}
+
+func mergeJSONArrayRawTrusted(existingRaw, appendRaw string) (string, error) {
+	existingRaw = strings.TrimSpace(existingRaw)
+	appendRaw = strings.TrimSpace(appendRaw)
+	if existingRaw == "" {
+		existingRaw = "[]"
+	}
+	if appendRaw == "" {
+		appendRaw = "[]"
 	}
 
 	existingInner, existingEmpty, err := validatedJSONArrayInner(existingRaw)
