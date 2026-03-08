@@ -185,6 +185,61 @@ func TestConvertOpenAIChatCompletionsResponseToOpenAIResponsesEscapesFunctionArg
 	}
 }
 
+func TestConvertOpenAIChatCompletionsResponseToOpenAIResponsesNonStreamUsage(t *testing.T) {
+	rawJSON := []byte(`{
+		"id":"chatcmpl-nonstream",
+		"created":9,
+		"model":"gpt-5.4",
+		"choices":[
+			{
+				"index":0,
+				"message":{
+					"content":"你好，非流式",
+					"tool_calls":[
+						{
+							"id":"call-1",
+							"function":{"name":"lookup","arguments":"{\"q\":\"cli\"}"}
+						}
+					]
+				}
+			}
+		],
+		"usage":{"prompt_tokens":12,"completion_tokens":6,"total_tokens":18,"prompt_tokens_details":{"cached_tokens":3}}
+	}`)
+	requestRawJSON := []byte(`{"model":"gpt-5.4","instructions":"请直接回答"}`)
+
+	resp := ConvertOpenAIChatCompletionsResponseToOpenAIResponsesNonStream(context.Background(), "gpt-5.4", requestRawJSON, requestRawJSON, rawJSON, nil)
+	if !gjson.Valid(resp) {
+		t.Fatalf("non-stream response is not valid JSON: %s", resp)
+	}
+
+	parsed := gjson.Parse(resp)
+	if got := parsed.Get("model").String(); got != "gpt-5.4" {
+		t.Fatalf("model = %q, want %q", got, "gpt-5.4")
+	}
+	if got := parsed.Get("instructions").String(); got != "请直接回答" {
+		t.Fatalf("instructions = %q, want %q", got, "请直接回答")
+	}
+	if got := parsed.Get("output.0.content.0.text").String(); got != "你好，非流式" {
+		t.Fatalf("message text = %q, want %q", got, "你好，非流式")
+	}
+	if got := parsed.Get("output.1.arguments").String(); got != "{\"q\":\"cli\"}" {
+		t.Fatalf("function arguments = %q, want %q", got, "{\"q\":\"cli\"}")
+	}
+	if got := parsed.Get("usage.input_tokens").Int(); got != 12 {
+		t.Fatalf("input_tokens = %d, want %d", got, 12)
+	}
+	if got := parsed.Get("usage.output_tokens").Int(); got != 6 {
+		t.Fatalf("output_tokens = %d, want %d", got, 6)
+	}
+	if got := parsed.Get("usage.total_tokens").Int(); got != 18 {
+		t.Fatalf("total_tokens = %d, want %d", got, 18)
+	}
+	if got := parsed.Get("usage.input_tokens_details.cached_tokens").Int(); got != 3 {
+		t.Fatalf("cached_tokens = %d, want %d", got, 3)
+	}
+}
+
 func BenchmarkConvertOpenAIChatCompletionsResponseToOpenAIResponses(b *testing.B) {
 	chunks := [][]byte{
 		[]byte(`data: {"id":"chatcmpl-1","created":1,"object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"第一段"}}]}`),
@@ -203,6 +258,36 @@ func BenchmarkConvertOpenAIChatCompletionsResponseToOpenAIResponses(b *testing.B
 		}
 		if total == 0 {
 			b.Fatal("translator returned no events")
+		}
+	}
+}
+
+func BenchmarkConvertOpenAIChatCompletionsResponseToOpenAIResponsesNonStream(b *testing.B) {
+	rawJSON := []byte(`{
+		"id":"chatcmpl-nonstream",
+		"created":9,
+		"model":"gpt-5.4",
+		"choices":[
+			{
+				"index":0,
+				"message":{
+					"content":"第一段回复",
+					"tool_calls":[
+						{"id":"call-1","function":{"name":"lookup","arguments":"{\"q\":\"cli\"}"}},
+						{"id":"call-2","function":{"name":"search","arguments":"{\"q\":\"proxy\"}"}}
+					]
+				}
+			}
+		],
+		"usage":{"prompt_tokens":64,"completion_tokens":32,"total_tokens":96,"prompt_tokens_details":{"cached_tokens":12}}
+	}`)
+	requestRawJSON := []byte(`{"model":"gpt-5.4","instructions":"请简短回答","tools":[{"type":"function","name":"lookup","parameters":{"type":"object"}}]}`)
+
+	b.ReportAllocs()
+	for b.Loop() {
+		out := ConvertOpenAIChatCompletionsResponseToOpenAIResponsesNonStream(context.Background(), "gpt-5.4", requestRawJSON, requestRawJSON, rawJSON, nil)
+		if len(out) == 0 {
+			b.Fatal("translator returned empty response")
 		}
 	}
 }

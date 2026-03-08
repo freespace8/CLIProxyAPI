@@ -393,6 +393,72 @@ func functionOutputItemDonePayload(seq int, itemID string, outputIndex int, argu
 	return string(buf)
 }
 
+func functionOutputItemAddedEvent(seq int, itemID string, outputIndex int, callID string, name string) string {
+	buf := make([]byte, 0, len(itemID)+len(callID)+len(name)+224)
+	buf = appendSSEPrefix(buf, "response.output_item.added")
+	buf = append(buf, `{"type":"response.output_item.added","sequence_number":`...)
+	buf = strconv.AppendInt(buf, int64(seq), 10)
+	buf = append(buf, `,"output_index":`...)
+	buf = strconv.AppendInt(buf, int64(outputIndex), 10)
+	buf = append(buf, `,"item":{"id":`...)
+	buf = strconv.AppendQuote(buf, itemID)
+	buf = append(buf, `,"type":"function_call","status":"in_progress","arguments":"","call_id":`...)
+	buf = strconv.AppendQuote(buf, callID)
+	buf = append(buf, `,"name":`...)
+	buf = strconv.AppendQuote(buf, name)
+	buf = append(buf, `}}`...)
+	return string(buf)
+}
+
+func functionCallArgumentsDeltaEvent(seq int, itemID string, outputIndex int, delta string) string {
+	buf := make([]byte, 0, len(itemID)+len(delta)+176)
+	buf = appendSSEPrefix(buf, "response.function_call_arguments.delta")
+	buf = append(buf, `{"type":"response.function_call_arguments.delta","sequence_number":`...)
+	buf = strconv.AppendInt(buf, int64(seq), 10)
+	buf = append(buf, `,"item_id":`...)
+	buf = strconv.AppendQuote(buf, itemID)
+	buf = append(buf, `,"output_index":`...)
+	buf = strconv.AppendInt(buf, int64(outputIndex), 10)
+	buf = append(buf, `,"delta":`...)
+	buf = strconv.AppendQuote(buf, delta)
+	buf = append(buf, `}`...)
+	return string(buf)
+}
+
+func functionCallArgumentsDoneEvent(seq int, itemID string, outputIndex int, arguments string) string {
+	buf := make([]byte, 0, len(itemID)+len(arguments)+184)
+	buf = appendSSEPrefix(buf, "response.function_call_arguments.done")
+	buf = append(buf, `{"type":"response.function_call_arguments.done","sequence_number":`...)
+	buf = strconv.AppendInt(buf, int64(seq), 10)
+	buf = append(buf, `,"item_id":`...)
+	buf = strconv.AppendQuote(buf, itemID)
+	buf = append(buf, `,"output_index":`...)
+	buf = strconv.AppendInt(buf, int64(outputIndex), 10)
+	buf = append(buf, `,"arguments":`...)
+	buf = strconv.AppendQuote(buf, arguments)
+	buf = append(buf, `}`...)
+	return string(buf)
+}
+
+func functionOutputItemDoneEvent(seq int, itemID string, outputIndex int, arguments string, callID string, name string) string {
+	buf := make([]byte, 0, len(itemID)+len(arguments)+len(callID)+len(name)+240)
+	buf = appendSSEPrefix(buf, "response.output_item.done")
+	buf = append(buf, `{"type":"response.output_item.done","sequence_number":`...)
+	buf = strconv.AppendInt(buf, int64(seq), 10)
+	buf = append(buf, `,"output_index":`...)
+	buf = strconv.AppendInt(buf, int64(outputIndex), 10)
+	buf = append(buf, `,"item":{"id":`...)
+	buf = strconv.AppendQuote(buf, itemID)
+	buf = append(buf, `,"type":"function_call","status":"completed","arguments":`...)
+	buf = strconv.AppendQuote(buf, arguments)
+	buf = append(buf, `,"call_id":`...)
+	buf = strconv.AppendQuote(buf, callID)
+	buf = append(buf, `,"name":`...)
+	buf = strconv.AppendQuote(buf, name)
+	buf = append(buf, `}}`...)
+	return string(buf)
+}
+
 func completedReasoningItemPayload(itemID string, text string) string {
 	buf := make([]byte, 0, len(itemID)+len(text)+104)
 	buf = append(buf, `{"id":`...)
@@ -627,8 +693,8 @@ func appendMessageDoneEvents(out []string, responseID string, outputIndex int, t
 
 func appendFunctionDoneEvents(out []string, callID string, outputIndex int, arguments string, name string, nextSeq func() int) []string {
 	itemID := functionItemID(callID)
-	out = append(out, emitRespEvent("response.function_call_arguments.done", functionCallArgumentsDonePayload(nextSeq(), itemID, outputIndex, arguments)))
-	out = append(out, emitRespEvent("response.output_item.done", functionOutputItemDonePayload(nextSeq(), itemID, outputIndex, arguments, callID, name)))
+	out = append(out, functionCallArgumentsDoneEvent(nextSeq(), itemID, outputIndex, arguments))
+	out = append(out, functionOutputItemDoneEvent(nextSeq(), itemID, outputIndex, arguments, callID, name))
 	return out
 }
 
@@ -853,7 +919,7 @@ func ConvertOpenAIChatCompletionsResponseToOpenAIResponses(ctx context.Context, 
 
 					if shouldEmitItem && effectiveCallID != "" {
 						name := st.FuncNames[idx]
-						out = append(out, emitRespEvent("response.output_item.added", functionOutputItemAddedPayload(nextSeq(), functionItemID(effectiveCallID), idx, effectiveCallID, name)))
+						out = append(out, functionOutputItemAddedEvent(nextSeq(), functionItemID(effectiveCallID), idx, effectiveCallID, name))
 					}
 
 					// Ensure args buffer exists for this index
@@ -870,7 +936,7 @@ func ConvertOpenAIChatCompletionsResponseToOpenAIResponses(ctx context.Context, 
 							refCallID = newCallID
 						}
 						if refCallID != "" {
-							out = append(out, emitRespEvent("response.function_call_arguments.delta", functionCallArgumentsDeltaPayload(nextSeq(), functionItemID(refCallID), idx, argsText)))
+							out = append(out, functionCallArgumentsDeltaEvent(nextSeq(), functionItemID(refCallID), idx, argsText))
 						}
 						st.FuncArgsBuf[idx].WriteString(argsText)
 					}
@@ -965,100 +1031,36 @@ func ConvertOpenAIChatCompletionsResponseToOpenAIResponses(ctx context.Context, 
 func ConvertOpenAIChatCompletionsResponseToOpenAIResponsesNonStream(_ context.Context, _ string, originalRequestRawJSON, requestRawJSON, rawJSON []byte, _ *any) string {
 	root := gjson.ParseBytes(rawJSON)
 
-	// Basic response scaffold
-	resp := `{"id":"","object":"response","created_at":0,"status":"completed","background":false,"error":null,"incomplete_details":null}`
-
 	// id: use provider id if present, otherwise synthesize
 	id := root.Get("id").String()
 	if id == "" {
 		id = fmt.Sprintf("resp_%x_%d", time.Now().UnixNano(), atomic.AddUint64(&responseIDCounter, 1))
 	}
-	resp, _ = sjson.Set(resp, "id", id)
 
 	// created_at: map from chat.completion created
 	created := root.Get("created").Int()
 	if created == 0 {
 		created = time.Now().Unix()
 	}
-	resp, _ = sjson.Set(resp, "created_at", created)
-
-	// Echo request fields when available (aligns with streaming path behavior)
+	requestFields := buildCompletedRequestFields(requestRawJSON)
 	if len(requestRawJSON) > 0 {
 		req := gjson.ParseBytes(requestRawJSON)
-		if v := req.Get("instructions"); v.Exists() {
-			resp, _ = sjson.Set(resp, "instructions", v.String())
-		}
-		if v := req.Get("max_output_tokens"); v.Exists() {
-			resp, _ = sjson.Set(resp, "max_output_tokens", v.Int())
-		} else {
-			// Also support max_tokens from chat completion style
-			if v = req.Get("max_tokens"); v.Exists() {
-				resp, _ = sjson.Set(resp, "max_output_tokens", v.Int())
+		if !req.Get("max_output_tokens").Exists() {
+			if v := req.Get("max_tokens"); v.Exists() {
+				requestFields = string(appendJSONIntField([]byte(requestFields), "max_output_tokens", v.Int()))
 			}
 		}
-		if v := req.Get("max_tool_calls"); v.Exists() {
-			resp, _ = sjson.Set(resp, "max_tool_calls", v.Int())
-		}
-		if v := req.Get("model"); v.Exists() {
-			resp, _ = sjson.Set(resp, "model", v.String())
-		} else if v = root.Get("model"); v.Exists() {
-			resp, _ = sjson.Set(resp, "model", v.String())
-		}
-		if v := req.Get("parallel_tool_calls"); v.Exists() {
-			resp, _ = sjson.Set(resp, "parallel_tool_calls", v.Bool())
-		}
-		if v := req.Get("previous_response_id"); v.Exists() {
-			resp, _ = sjson.Set(resp, "previous_response_id", v.String())
-		}
-		if v := req.Get("prompt_cache_key"); v.Exists() {
-			resp, _ = sjson.Set(resp, "prompt_cache_key", v.String())
-		}
-		if v := req.Get("reasoning"); v.Exists() {
-			resp, _ = sjson.Set(resp, "reasoning", v.Value())
-		}
-		if v := req.Get("safety_identifier"); v.Exists() {
-			resp, _ = sjson.Set(resp, "safety_identifier", v.String())
-		}
-		if v := req.Get("service_tier"); v.Exists() {
-			resp, _ = sjson.Set(resp, "service_tier", v.String())
-		}
-		if v := req.Get("store"); v.Exists() {
-			resp, _ = sjson.Set(resp, "store", v.Bool())
-		}
-		if v := req.Get("temperature"); v.Exists() {
-			resp, _ = sjson.Set(resp, "temperature", v.Float())
-		}
-		if v := req.Get("text"); v.Exists() {
-			resp, _ = sjson.Set(resp, "text", v.Value())
-		}
-		if v := req.Get("tool_choice"); v.Exists() {
-			resp, _ = sjson.Set(resp, "tool_choice", v.Value())
-		}
-		if v := req.Get("tools"); v.Exists() {
-			resp, _ = sjson.Set(resp, "tools", v.Value())
-		}
-		if v := req.Get("top_logprobs"); v.Exists() {
-			resp, _ = sjson.Set(resp, "top_logprobs", v.Int())
-		}
-		if v := req.Get("top_p"); v.Exists() {
-			resp, _ = sjson.Set(resp, "top_p", v.Float())
-		}
-		if v := req.Get("truncation"); v.Exists() {
-			resp, _ = sjson.Set(resp, "truncation", v.String())
-		}
-		if v := req.Get("user"); v.Exists() {
-			resp, _ = sjson.Set(resp, "user", v.Value())
-		}
-		if v := req.Get("metadata"); v.Exists() {
-			resp, _ = sjson.Set(resp, "metadata", v.Value())
+		if !req.Get("model").Exists() {
+			if v := root.Get("model"); v.Exists() {
+				requestFields = string(appendJSONStringField([]byte(requestFields), "model", v.String()))
+			}
 		}
 	} else if v := root.Get("model"); v.Exists() {
-		// Fallback model from response
-		resp, _ = sjson.Set(resp, "model", v.String())
+		requestFields = string(appendJSONStringField(nil, "model", v.String()))
 	}
 
 	// Build output list from choices[...]
-	outputsWrapper := `{"arr":[]}`
+	outputItems := make([]string, 0, 4)
 	// Detect and capture reasoning content if present
 	rcText := gjson.GetBytes(rawJSON, "choices.0.message.reasoning_content").String()
 	includeReasoning := rcText != ""
@@ -1070,14 +1072,7 @@ func ConvertOpenAIChatCompletionsResponseToOpenAIResponsesNonStream(_ context.Co
 		if strings.HasPrefix(rid, "resp_") {
 			rid = strings.TrimPrefix(rid, "resp_")
 		}
-		// Prefer summary_text from reasoning_content; encrypted_content is optional
-		reasoningItem := `{"id":"","type":"reasoning","encrypted_content":"","summary":[]}`
-		reasoningItem, _ = sjson.Set(reasoningItem, "id", fmt.Sprintf("rs_%s", rid))
-		if rcText != "" {
-			reasoningItem, _ = sjson.Set(reasoningItem, "summary.0.type", "summary_text")
-			reasoningItem, _ = sjson.Set(reasoningItem, "summary.0.text", rcText)
-		}
-		outputsWrapper, _ = sjson.SetRaw(outputsWrapper, "arr.-1", reasoningItem)
+		outputItems = append(outputItems, completedReasoningItemPayload("rs_"+rid, rcText))
 	}
 
 	if choices := root.Get("choices"); choices.Exists() && choices.IsArray() {
@@ -1086,10 +1081,7 @@ func ConvertOpenAIChatCompletionsResponseToOpenAIResponsesNonStream(_ context.Co
 			if msg.Exists() {
 				// Text message part
 				if c := msg.Get("content"); c.Exists() && c.String() != "" {
-					item := `{"id":"","type":"message","status":"completed","content":[{"type":"output_text","annotations":[],"logprobs":[],"text":""}],"role":"assistant"}`
-					item, _ = sjson.Set(item, "id", fmt.Sprintf("msg_%s_%d", id, int(choice.Get("index").Int())))
-					item, _ = sjson.Set(item, "content.0.text", c.String())
-					outputsWrapper, _ = sjson.SetRaw(outputsWrapper, "arr.-1", item)
+					outputItems = append(outputItems, completedMessageItemPayload("msg_"+id+"_"+strconv.Itoa(int(choice.Get("index").Int())), c.String()))
 				}
 
 				// Function/tool calls
@@ -1098,12 +1090,7 @@ func ConvertOpenAIChatCompletionsResponseToOpenAIResponsesNonStream(_ context.Co
 						callID := tc.Get("id").String()
 						name := tc.Get("function.name").String()
 						args := tc.Get("function.arguments").String()
-						item := `{"id":"","type":"function_call","status":"completed","arguments":"","call_id":"","name":""}`
-						item, _ = sjson.Set(item, "id", fmt.Sprintf("fc_%s", callID))
-						item, _ = sjson.Set(item, "arguments", args)
-						item, _ = sjson.Set(item, "call_id", callID)
-						item, _ = sjson.Set(item, "name", name)
-						outputsWrapper, _ = sjson.SetRaw(outputsWrapper, "arr.-1", item)
+						outputItems = append(outputItems, completedFunctionItemPayload("fc_"+callID, args, callID, name))
 						return true
 					})
 				}
@@ -1111,29 +1098,6 @@ func ConvertOpenAIChatCompletionsResponseToOpenAIResponsesNonStream(_ context.Co
 			return true
 		})
 	}
-	if gjson.Get(outputsWrapper, "arr.#").Int() > 0 {
-		resp, _ = sjson.SetRaw(resp, "output", gjson.Get(outputsWrapper, "arr").Raw)
-	}
 
-	// usage mapping
-	if usage := root.Get("usage"); usage.Exists() {
-		// Map common tokens
-		if usage.Get("prompt_tokens").Exists() || usage.Get("completion_tokens").Exists() || usage.Get("total_tokens").Exists() {
-			resp, _ = sjson.Set(resp, "usage.input_tokens", usage.Get("prompt_tokens").Int())
-			if d := usage.Get("prompt_tokens_details.cached_tokens"); d.Exists() {
-				resp, _ = sjson.Set(resp, "usage.input_tokens_details.cached_tokens", d.Int())
-			}
-			resp, _ = sjson.Set(resp, "usage.output_tokens", usage.Get("completion_tokens").Int())
-			// Reasoning tokens not available in Chat Completions; set only if present under output_tokens_details
-			if d := usage.Get("output_tokens_details.reasoning_tokens"); d.Exists() {
-				resp, _ = sjson.Set(resp, "usage.output_tokens_details.reasoning_tokens", d.Int())
-			}
-			resp, _ = sjson.Set(resp, "usage.total_tokens", usage.Get("total_tokens").Int())
-		} else {
-			// Fallback to raw usage object if structure differs
-			resp, _ = sjson.Set(resp, "usage", usage.Value())
-		}
-	}
-
-	return resp
+	return nonStreamResponsePayload(id, created, requestFields, jsonArrayFromRawItems(outputItems), root.Get("usage"))
 }
