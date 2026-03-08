@@ -1070,11 +1070,13 @@ func ConvertOpenAIChatCompletionsResponseToOpenAIResponses(ctx context.Context, 
 						st.FuncArgsDone[i] = true
 					}
 				}
-				// Build response.output using aggregated buffers
-				outputItems := make([]string, 0, len(st.Reasonings)+len(st.MsgItemAdded)+len(st.FuncArgsBuf))
+				// Build response.output using aggregated buffers directly into the final JSON array.
+				outputArray := make([]byte, 0, len(st.CompletedRequestFields)+len(st.Reasonings)*96+len(st.MsgItemAdded)*160+len(st.FuncArgsBuf)*176)
+				hasOutputItems := false
 				if len(st.Reasonings) > 0 {
 					for _, r := range st.Reasonings {
-						outputItems = append(outputItems, completedReasoningItemPayload(r.ReasoningID, r.ReasoningData))
+						outputArray = appendCompletedReasoningItemPayload(outputArray, r.ReasoningID, r.ReasoningData, hasOutputItems)
+						hasOutputItems = true
 					}
 				}
 				// Append message items in ascending index order
@@ -1085,7 +1087,8 @@ func ConvertOpenAIChatCompletionsResponseToOpenAIResponses(ctx context.Context, 
 						if b := st.MsgTextBuf[i]; b != nil {
 							txt = b.String()
 						}
-						outputItems = append(outputItems, completedMessageItemPayload(messageItemID(st.ResponseID, i), txt))
+						outputArray = appendCompletedMessageItemPayload(outputArray, messageItemID(st.ResponseID, i), txt, hasOutputItems)
+						hasOutputItems = true
 					}
 				}
 				if len(st.FuncArgsBuf) > 0 {
@@ -1097,11 +1100,16 @@ func ConvertOpenAIChatCompletionsResponseToOpenAIResponses(ctx context.Context, 
 						}
 						callID := st.FuncCallIDs[i]
 						name := st.FuncNames[i]
-						outputItems = append(outputItems, completedFunctionItemPayload(functionItemID(callID), args, callID, name))
+						outputArray = appendCompletedFunctionItemPayload(outputArray, functionItemID(callID), args, callID, name, hasOutputItems)
+						hasOutputItems = true
 					}
 				}
-				outputArray := jsonArrayFromRawItems(outputItems)
-				out = append(out, completedEvent(nextSeq(), st.ResponseID, st.Created, st.CompletedRequestFields, outputArray, st.PromptTokens, st.CachedTokens, st.CompletionTokens, st.TotalTokens, st.ReasoningTokens, st.UsageSeen))
+				outputArrayRaw := ""
+				if hasOutputItems {
+					outputArray = append(outputArray, ']')
+					outputArrayRaw = string(outputArray)
+				}
+				out = append(out, completedEvent(nextSeq(), st.ResponseID, st.Created, st.CompletedRequestFields, outputArrayRaw, st.PromptTokens, st.CachedTokens, st.CompletionTokens, st.TotalTokens, st.ReasoningTokens, st.UsageSeen))
 			}
 
 			return true
