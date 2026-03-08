@@ -767,7 +767,7 @@ func websocketJSONPayloadsFromChunk(chunk []byte) [][]byte {
 			goto nextLine
 		}
 		if stdjson.Valid(line) {
-			payloads = append(payloads, bytes.Clone(line))
+			payloads = append(payloads, line)
 		}
 
 	nextLine:
