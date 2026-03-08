@@ -609,13 +609,12 @@ func validatedJSONArrayInner(raw string) (string, bool, error) {
 }
 
 func normalizeJSONArrayRaw(raw []byte) string {
-	trimmed := strings.TrimSpace(string(raw))
-	if trimmed == "" {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
 		return "[]"
 	}
-	result := gjson.Parse(trimmed)
-	if result.Type == gjson.JSON && result.IsArray() {
-		return trimmed
+	if trimmed[0] == '[' && trimmed[len(trimmed)-1] == ']' {
+		return string(trimmed)
 	}
 	return "[]"
 }
