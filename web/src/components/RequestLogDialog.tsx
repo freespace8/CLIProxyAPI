@@ -26,16 +26,17 @@ function formatTokensPerSecond(totalTokens: number, durationMs: number): string 
   if (!Number.isFinite(durationMs) || durationMs <= 0) return '--'
   const tokensPerSecond = totalTokens / (durationMs / 1000)
   if (!Number.isFinite(tokensPerSecond) || tokensPerSecond <= 0) return '--'
-  if (tokensPerSecond >= 1000) return `${(tokensPerSecond / 1000).toFixed(1)}K tok/s`
-  return `${Math.round(tokensPerSecond)} tok/s`
+  if (tokensPerSecond >= 1000) return `${(tokensPerSecond / 1000).toFixed(1)}Kt/s`
+  return `${Math.round(tokensPerSecond)}t/s`
 }
 
 function formatPerformance(detail: RequestLogRecord): string {
+  if (!detail.success) return '--'
   return [
     formatDuration(detail.firstTokenMs),
     formatDuration(detail.durationMs),
     formatTokensPerSecond(detail.totalTokens, detail.durationMs),
-  ].join(' / ')
+  ].join('/')
 }
 
 function copyText(value: string) {

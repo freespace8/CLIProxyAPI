@@ -107,7 +107,7 @@ describe('CodexMonitor responsive layout', () => {
     })
 
     expect(screen.getAllByText('失败(500)').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('240ms / 1.82s / 844 tok/s').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('--').length).toBeGreaterThan(0)
     expect(screen.queryByText('upstream timeout')).not.toBeInTheDocument()
     expect(screen.getByText('读缓存')).toBeInTheDocument()
     expect(screen.getByText('写缓存')).toBeInTheDocument()

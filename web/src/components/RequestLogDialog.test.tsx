@@ -44,6 +44,6 @@ describe('RequestLogDialog', () => {
   it('shows first token and total duration separately', () => {
     render(<RequestLogDialog log={failedLog} onClose={() => {}} />)
 
-    expect(screen.getByText('性能 120ms / 320ms / --')).toBeInTheDocument()
+    expect(screen.getByText('性能 --')).toBeInTheDocument()
   })
 })

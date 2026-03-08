@@ -67,15 +67,16 @@ function formatTokensPerSecond(totalTokens: number, durationMs: number): string 
   if (!Number.isFinite(durationMs) || durationMs <= 0) return '--'
   const tokensPerSecond = totalTokens / (durationMs / 1000)
   if (!Number.isFinite(tokensPerSecond) || tokensPerSecond <= 0) return '--'
-  return `${formatCompactCount(Math.round(tokensPerSecond))} tok/s`
+  return `${formatCompactCount(Math.round(tokensPerSecond))}t/s`
 }
 
 function formatPerformance(log: RequestLogRecord): string {
+  if (!log.success) return '--'
   return [
     formatDuration(log.firstTokenMs),
     formatDuration(log.durationMs),
     formatTokensPerSecond(log.totalTokens, log.durationMs),
-  ].join(' / ')
+  ].join('/')
 }
 
 function formatStatusLabel(log: RequestLogRecord): string {
@@ -361,12 +362,12 @@ function MobileLogCard(props: {
             <p className="font-mono text-xs text-muted-foreground">{formatTime(props.log.timestamp)}</p>
           </div>
           {props.log.success ? (
-            <span className={`inline-flex w-fit items-center rounded-full border px-3 py-1 text-xs font-medium ${statusClass(props.log)}`}>
+            <span className={`inline-flex w-fit items-center rounded-full border px-3 py-1 text-xs font-semibold ${statusClass(props.log)}`}>
               {statusLabel}
             </span>
           ) : (
             <button
-              className={`inline-flex w-fit items-center rounded-full border px-3 py-1 text-left text-xs font-medium underline underline-offset-4 ${statusClass(props.log)}`}
+              className={`inline-flex w-fit items-center rounded-full border px-3 py-1 text-left text-xs font-semibold underline underline-offset-4 ${statusClass(props.log)}`}
               onClick={() => props.onOpenError(props.log)}
               title={statusLabel}
               type="button"
@@ -390,7 +391,7 @@ function LogsTable(props: {
   logs: RequestLogRecord[]
   onOpenError: (log: RequestLogRecord) => void
 }) {
-  const desktopGridClassName = 'grid w-full grid-cols-[minmax(0,1.05fr)_minmax(0,1.35fr)_minmax(72px,0.78fr)_minmax(180px,1.7fr)_minmax(64px,0.62fr)_minmax(64px,0.66fr)_minmax(64px,0.66fr)] items-center gap-3 lg:gap-4'
+  const desktopGridClassName = 'grid w-full grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)_minmax(64px,0.58fr)_minmax(208px,1.95fr)_minmax(64px,0.6fr)_minmax(64px,0.64fr)_minmax(64px,0.64fr)] items-center gap-3 lg:gap-4'
 
   return (
     <>
@@ -424,10 +425,10 @@ function LogsTable(props: {
               </span>
               <span className="min-w-0">
                 {log.success ? (
-                  <span className={`block truncate text-sm font-medium ${statusClass(log)}`}>{formatStatusLabel(log)}</span>
+                  <span className={`block truncate text-xs font-semibold ${statusClass(log)}`}>{formatStatusLabel(log)}</span>
                 ) : (
                   <button
-                    className={`block w-full truncate text-left text-sm font-medium underline underline-offset-4 focus-visible:outline-none ${statusClass(log)}`}
+                    className={`block w-full truncate text-left text-xs font-semibold underline underline-offset-4 focus-visible:outline-none ${statusClass(log)}`}
                     onClick={() => props.onOpenError(log)}
                     title={formatStatusLabel(log)}
                     type="button"
