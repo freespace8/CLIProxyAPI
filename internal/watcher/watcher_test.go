@@ -472,7 +472,6 @@ func TestAuthFileEventsDoNotInvokeSnapshotCoreAuths(t *testing.T) {
 	}
 }
 
-<<<<<<< HEAD
 func TestAuthSliceToMap(t *testing.T) {
 	t.Parallel()
 
