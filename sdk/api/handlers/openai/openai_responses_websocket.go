@@ -286,7 +286,7 @@ func normalizeResponseSubsequentRequest(rawJSON []byte, lastRequest []byte, last
 				normalized, _ = sjson.SetRawBytes(normalized, "instructions", []byte(lastInstructions.Raw))
 			}
 			normalized, _ = sjson.SetBytes(normalized, "stream", true)
-			return normalized, bytes.Clone(normalized), nil
+			return normalized, normalized, nil
 		}
 	}
 
@@ -327,7 +327,7 @@ func normalizeResponseSubsequentRequest(rawJSON []byte, lastRequest []byte, last
 		normalized, _ = sjson.SetRawBytes(normalized, "instructions", []byte(lastInstructions.Raw))
 	}
 	normalized, _ = sjson.SetBytes(normalized, "stream", true)
-	return normalized, bytes.Clone(normalized), nil
+	return normalized, normalized, nil
 }
 
 func websocketUpstreamSupportsIncrementalInput(attributes map[string]string, metadata map[string]any) bool {
